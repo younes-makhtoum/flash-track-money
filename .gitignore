@@ -39,3 +39,32 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Security - Never commit these!
+.env
+.env.production
+.env.staging
+secrets.json
+config/secrets.*
+
+# App specific
+# Keep receipts directory structure but ignore actual files
+src/assets/receipts/*
+!src/assets/receipts/.gitkeep
+
+# Development tools
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs
+*.log
+
+# Build directories
+build/
+
+# Temporary folders
+tmp/
+temp/
