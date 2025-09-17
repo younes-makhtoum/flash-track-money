@@ -2,8 +2,16 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppSettings, SyncStatus, NewTransaction, LunchMoneyCategory, LunchMoneyTag } from '../types';
+import { SecureStorage } from '../utils/storage';
+import { isAPIConfigured, testAPIConnection } from '../services/lunchMoneyAPI';
 
 interface AppState {
+  // Authentication
+  isAuthenticated: boolean;
+  setAuthenticated: (authenticated: boolean) => void;
+  checkAuthStatus: () => Promise<void>;
+  testConnection: () => Promise<boolean>;
+
   // Settings
   settings: AppSettings;
   updateSettings: (settings: Partial<AppSettings>) => void;
@@ -34,6 +42,33 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
+      // Authentication
+      isAuthenticated: false,
+      setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
+      checkAuthStatus: async () => {
+        try {
+          const hasToken = await isAPIConfigured();
+          set({ isAuthenticated: hasToken });
+        } catch (error) {
+          console.error('Error checking auth status:', error);
+          set({ isAuthenticated: false });
+        }
+      },
+      testConnection: async () => {
+        try {
+          const result = await testAPIConnection();
+          set({ isAuthenticated: result.success });
+          if (!result.success) {
+            set({ error: result.error || 'Connection test failed' });
+          }
+          return result.success;
+        } catch (error) {
+          console.error('Error testing connection:', error);
+          set({ isAuthenticated: false, error: 'Connection test failed' });
+          return false;
+        }
+      },
+
       // Settings
       settings: {
         enableOfflineMode: true,
@@ -104,6 +139,7 @@ export const useAppStore = create<AppState>()(
         categories: state.categories,
         tags: state.tags,
         offlineTransactions: state.offlineTransactions,
+        // Note: Don't persist isAuthenticated, check on app start
       }),
     }
   )
