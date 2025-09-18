@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 // Lunch Money API configuration
 const LUNCH_MONEY_API_URL = 'https://dev.lunchmoney.app/v1';
@@ -55,6 +56,41 @@ export default function App() {
   const [selectedCategoryGroup, setSelectedCategoryGroup] = useState<any>(null);
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  
+  // Tag-related state
+  const [availableTags, setAvailableTags] = useState<string[]>([]);
+  const [tagSearchQuery, setTagSearchQuery] = useState('');
+  const [isTagSearching, setIsTagSearching] = useState(false);
+  
+  // Transaction detail fields
+  const [transactionNote, setTransactionNote] = useState('');
+  const [transactionDescription, setTransactionDescription] = useState('');
+  const [transactionTags, setTransactionTags] = useState<string[]>([]);
+  const [transactionPayee, setTransactionPayee] = useState('');
+  const [transactionDate, setTransactionDate] = useState(new Date());
+  const [hasReceipt, setHasReceipt] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // Helper functions for date formatting
+  const formatDateForDisplay = (date: Date) => {
+    const day = date.getDate();
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const month = monthNames[date.getMonth()];
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  };
+
+  const formatTimeForDisplay = (date: Date) => {
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${hours}:${minutes}`;
+  };
+
+  const formatDateToISO8601 = (date: Date) => {
+    return date.toISOString();
+  };
 
   // Keypad functions
   const handleKeypadInput = (input: string) => {
@@ -135,6 +171,7 @@ export default function App() {
       console.log('🚀 Triggering account and category fetch from useEffect');
       fetchAccounts();
       fetchCategories();
+      fetchTags();
     }
   }, [token, currentScreen]);
 
@@ -339,6 +376,40 @@ export default function App() {
     } catch (error) {
       console.log('❌ Error fetching categories:', error);
       setError('Failed to fetch categories');
+    }
+  };
+
+  // Fetch tags from Lunch Money API
+  const fetchTags = async () => {
+    if (!token) {
+      console.log('❌ No token available for fetching tags');
+      return;
+    }
+    
+    try {
+      console.log('🏷️ Fetching tags...');
+      const tagsData = await callLunchMoneyAPI('/tags', token);
+      console.log('🏷️ Raw tags response:', tagsData);
+      
+      if (tagsData && Array.isArray(tagsData)) {
+        // Extract tag names from the response
+        const tagNames = tagsData.map((tag: any) => {
+          // Tags might be objects with name property or just strings
+          return typeof tag === 'string' ? tag : tag.name || tag.tag || '';
+        }).filter((name: string) => name.trim() !== '');
+        
+        // Remove duplicates and sort
+        const uniqueTags = [...new Set(tagNames)].sort();
+        console.log('🏷️ Processed tags:', uniqueTags);
+        setAvailableTags(uniqueTags);
+      } else {
+        console.log('🏷️ No tags found or unexpected format');
+        setAvailableTags([]);
+      }
+    } catch (error) {
+      console.log('❌ Error fetching tags:', error);
+      // Don't set error for tags as they're optional
+      setAvailableTags([]);
     }
   };
 
@@ -966,6 +1037,360 @@ export default function App() {
     );
   }
 
+  // Tags Selection Screen
+  if (currentScreen === 'selectTags') {
+    const filteredTags = tagSearchQuery
+      ? availableTags.filter(tag => 
+          tag.toLowerCase().includes(tagSearchQuery.toLowerCase())
+        )
+      : availableTags;
+
+    return (
+      <View style={styles.categorySelectionContainer}>
+        <View style={styles.categorySelectionHeader}>
+          <TouchableOpacity 
+            style={styles.categoryBackButton}
+            onPress={() => setCurrentScreen('transactionDetails')}
+          >
+            <Text style={styles.categoryBackText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.categorySelectionTitle}>Select Tags</Text>
+          <View style={styles.categoryBackButton}></View>
+        </View>
+
+        {/* Search */}
+        <View style={styles.categorySearchHeader}>
+          <View style={styles.categoryBackButton}></View>
+          <TextInput
+            style={styles.categorySearchInput}
+            placeholder="Search tags..."
+            placeholderTextColor="rgba(255,255,255,0.7)"
+            value={tagSearchQuery}
+            onChangeText={setTagSearchQuery}
+            autoFocus={false}
+          />
+          <View style={styles.categoryBackButton}></View>
+        </View>
+
+        {/* Selected Tags Display */}
+        {transactionTags.length > 0 && (
+          <View style={styles.selectedTagsContainer}>
+            <Text style={styles.selectedTagsLabel}>Selected Tags:</Text>
+            <View style={styles.selectedTagsList}>
+              {transactionTags.map((tag, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.selectedTag}
+                  onPress={() => {
+                    const newTags = transactionTags.filter(t => t !== tag);
+                    setTransactionTags(newTags);
+                  }}
+                >
+                  <Text style={styles.selectedTagText}>{tag}</Text>
+                  <Text style={styles.selectedTagRemove}>×</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Available Tags List */}
+        <ScrollView style={styles.categoryContent}>
+          {filteredTags.map((tag, index) => {
+            const isSelected = transactionTags.includes(tag);
+            
+            return (
+              <TouchableOpacity
+                key={index}
+                style={[styles.categoryItem, isSelected && styles.selectedCategoryItem]}
+                onPress={() => {
+                  if (isSelected) {
+                    // Remove tag
+                    const newTags = transactionTags.filter(t => t !== tag);
+                    setTransactionTags(newTags);
+                  } else {
+                    // Add tag
+                    setTransactionTags([...transactionTags, tag]);
+                  }
+                }}
+              >
+                <View style={[styles.categoryIcon, { backgroundColor: '#4A90E2' }]}>
+                  <Text style={styles.categoryIconText}>#</Text>
+                </View>
+                <View style={styles.categoryInfo}>
+                  <Text style={[styles.categoryName, isSelected && styles.selectedCategoryName]}>
+                    {tag}
+                  </Text>
+                </View>
+                {isSelected && (
+                  <View style={styles.categoryCheckmark}>
+                    <Text style={styles.categoryCheckmarkText}>✓</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          
+          {/* Add New Tag Option */}
+          {tagSearchQuery && !availableTags.some(tag => tag.toLowerCase() === tagSearchQuery.toLowerCase()) && (
+            <TouchableOpacity
+              style={styles.categoryItem}
+              onPress={() => {
+                const newTag = tagSearchQuery.trim();
+                if (newTag && !transactionTags.includes(newTag)) {
+                  setTransactionTags([...transactionTags, newTag]);
+                  setAvailableTags([...availableTags, newTag]);
+                  setTagSearchQuery('');
+                }
+              }}
+            >
+              <View style={[styles.categoryIcon, { backgroundColor: '#4CAF50' }]}>
+                <Text style={styles.categoryIconText}>+</Text>
+              </View>
+              <View style={styles.categoryInfo}>
+                <Text style={styles.categoryName}>
+                  Create "{tagSearchQuery}"
+                </Text>
+                <Text style={styles.categoryDescription}>Add new tag</Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          
+          {filteredTags.length === 0 && !tagSearchQuery && (
+            <View style={styles.categoryEmptyState}>
+              <Text style={styles.categoryEmptyText}>No tags available</Text>
+              <Text style={styles.categoryEmptySubtext}>Start typing to create a new tag</Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Transaction Details Screen
+  if (currentScreen === 'transactionDetails') {
+    return (
+      <>
+        <View style={styles.transactionDetailsContainer}>
+          {/* Header */}
+          <View style={styles.transactionDetailsHeader}>
+            <TouchableOpacity 
+              style={styles.detailsBackButton}
+              onPress={() => setCurrentScreen('addTransaction')}
+            >
+              <Text style={styles.detailsBackText}>←</Text>
+            </TouchableOpacity>
+            <Text style={styles.transactionDetailsTitle}>
+              {selectedAccountData?.currency === 'eur' ? '€' : 
+               selectedAccountData?.currency === 'mad' ? 'MAD' : 
+               selectedAccountData?.currency === 'usd' ? '$' : '$'} {amount}
+            </Text>
+            <TouchableOpacity 
+              style={styles.detailsSaveButton}
+              onPress={() => setCurrentScreen('addTransaction')}
+            >
+              <Text style={styles.detailsSaveText}>✓</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.transactionDetailsContent}>
+            {/* Note Section */}
+            <View style={styles.detailsSection}>
+              <Text style={styles.detailsLabel}>NOTES</Text>
+              <TextInput
+                style={styles.detailsInput}
+                placeholder="Description"
+                placeholderTextColor="#A0A0A0"
+                value={transactionNote}
+                onChangeText={setTransactionNote}
+                multiline={true}
+                numberOfLines={3}
+              />
+            </View>
+
+            {/* Payee Section */}
+            <View style={styles.detailsSection}>
+              <Text style={styles.detailsLabel}>Payee</Text>
+              <TextInput
+                style={styles.detailsInput}
+                placeholder="Enter payee name"
+                placeholderTextColor="#A0A0A0"
+                value={transactionPayee}
+                onChangeText={setTransactionPayee}
+              />
+            </View>
+
+            {/* Date and Time Section */}
+            <View style={styles.detailsRow}>
+              <View style={styles.detailsHalfSection}>
+                <Text style={styles.detailsLabel}>Date</Text>
+                <TouchableOpacity 
+                  style={styles.detailsDateButton}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <Text style={styles.detailsDateText}>
+                    {formatDateForDisplay(transactionDate)}
+                  </Text>
+                  <Text style={styles.detailsDropdownIcon}>▼</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.detailsHalfSection}>
+                <Text style={styles.detailsLabel}>Time</Text>
+                <TouchableOpacity 
+                  style={styles.detailsDateButton}
+                  onPress={() => setShowTimePicker(true)}
+                >
+                  <Text style={styles.detailsDateText}>
+                    {formatTimeForDisplay(transactionDate)}
+                  </Text>
+                  <Text style={styles.detailsDropdownIcon}>▼</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+          {/* Tags Section - Moved here */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>Tags</Text>
+            {transactionTags.length > 0 ? (
+              <View>
+                <View style={styles.selectedTagsList}>
+                  {transactionTags.map((tag, index) => (
+                    <View key={index} style={styles.selectedTag}>
+                      <Text style={styles.selectedTagText}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity 
+                  style={styles.addTagButton}
+                  onPress={() => setCurrentScreen('selectTags')}
+                >
+                  <Text style={styles.addTagText}>ADD TAG</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.addTagButton}
+                onPress={() => setCurrentScreen('selectTags')}
+              >
+                <Text style={styles.addTagText}>ADD TAG</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Receipt Section */}
+          <View style={styles.detailsSection}>
+              <Text style={styles.detailsLabel}>Attachments</Text>
+              <TouchableOpacity 
+                style={styles.addReceiptButton}
+                onPress={() => setHasReceipt(!hasReceipt)}
+              >
+                <Text style={styles.addReceiptText}>ADD RECEIPT</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </View>
+
+        {/* Date Picker Modal */}
+        {Platform.OS === 'ios' ? (
+          <Modal
+            animationType="slide"
+            transparent={true}
+            visible={showDatePicker}
+            onRequestClose={() => setShowDatePicker(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.modalTitle}>Select Date</Text>
+                  <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                    <Text style={styles.modalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={transactionDate}
+                  mode="date"
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setTransactionDate(selectedDate);
+                    }
+                  }}
+                  style={styles.dateTimePicker}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          showDatePicker && (
+            <DateTimePicker
+              value={transactionDate}
+              mode="date"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowDatePicker(false);
+                if (selectedDate) {
+                  setTransactionDate(selectedDate);
+                }
+              }}
+            />
+          )
+        )}
+
+        {/* Time Picker Modal */}
+        {Platform.OS === 'ios' ? (
+          <Modal
+            animationType="slide"
+            transparent={true}
+            visible={showTimePicker}
+            onRequestClose={() => setShowTimePicker(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.modalTitle}>Select Time</Text>
+                  <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                    <Text style={styles.modalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={transactionDate}
+                  mode="time"
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setTransactionDate(selectedDate);
+                    }
+                  }}
+                  style={styles.dateTimePicker}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          showTimePicker && (
+            <DateTimePicker
+              value={transactionDate}
+              mode="time"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowTimePicker(false);
+                if (selectedDate) {
+                  setTransactionDate(selectedDate);
+                }
+              }}
+            />
+          )
+        )}
+      </>
+    );
+  }
+
   // Add Transaction Screen
   if (currentScreen === 'addTransaction') {
     return (
@@ -1017,6 +1442,12 @@ export default function App() {
              selectedAccountData?.currency === 'usd' ? '$' : '$'}
           </Text>
           <Text style={styles.amountText}>{amount}</Text>
+          <TouchableOpacity 
+            style={styles.detailsButton}
+            onPress={() => setCurrentScreen('transactionDetails')}
+          >
+            <Text style={styles.detailsButtonText}>→</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Account and Category Cards */}
@@ -1769,5 +2200,429 @@ const styles = StyleSheet.create({
   categoryCloseText: {
     fontSize: 20,
     color: 'white',
+  },
+  
+  // Transaction Details Button
+  detailsButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 15,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  detailsButtonText: {
+    fontSize: 18,
+    color: '#2D7D7A',
+    fontWeight: 'bold',
+  },
+  
+  // Transaction Details Screen Styles
+  transactionDetailsContainer: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  transactionDetailsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#2D7D7A',
+  },
+  detailsBackButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  detailsBackText: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  transactionDetailsTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  detailsSaveButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  detailsSaveText: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  transactionDetailsContent: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  detailsSection: {
+    backgroundColor: 'white',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  detailsLabel: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  detailsInput: {
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 8,
+    minHeight: 40,
+  },
+  addTagButton: {
+    alignSelf: 'flex-start',
+  },
+  addTagText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  detailsRow: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    marginBottom: 20,
+  },
+  detailsHalfSection: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderRightWidth: 1,
+    borderRightColor: '#E0E0E0',
+  },
+  detailsDateButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  detailsDateText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  detailsDropdownIcon: {
+    fontSize: 12,
+    color: '#8E8E93',
+  },
+  addReceiptButton: {
+    alignSelf: 'flex-start',
+  },
+  addReceiptText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
+    textTransform: 'uppercase',
+  },
+  
+  // Date and Time Picker Styles
+  pickerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  datePickerContainer: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    margin: 20,
+    maxWidth: 320,
+    maxHeight: 500,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  datePickerHeader: {
+    backgroundColor: '#2D7D7A',
+    padding: 20,
+    alignItems: 'center',
+  },
+  datePickerDayName: {
+    fontSize: 14,
+    color: 'white',
+    opacity: 0.8,
+  },
+  datePickerMonth: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
+    marginTop: 8,
+  },
+  datePickerDay: {
+    fontSize: 60,
+    color: 'white',
+    fontWeight: '300',
+    marginTop: 8,
+  },
+  datePickerYear: {
+    fontSize: 16,
+    color: 'white',
+    opacity: 0.8,
+    marginTop: 8,
+  },
+  calendarContainer: {
+    padding: 20,
+  },
+  calendarMonthYear: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  calendarWeekHeader: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  calendarDayHeader: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calendarDay: {
+    width: '14.28%', // 7 days per week
+    aspectRatio: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 5,
+  },
+  calendarSelectedDay: {
+    backgroundColor: '#2D7D7A',
+    borderRadius: 20,
+  },
+  calendarDayText: {
+    fontSize: 14,
+    color: '#333',
+  },
+  calendarSelectedDayText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  timePickerContainer: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    margin: 20,
+    width: 300,
+    height: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  timePickerHeader: {
+    backgroundColor: '#2D7D7A',
+    padding: 20,
+    alignItems: 'center',
+  },
+  timePickerDisplay: {
+    fontSize: 48,
+    color: 'white',
+    fontWeight: '300',
+  },
+  timeCircleContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  timeMarker: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 15,
+  },
+  selectedTimeMarker: {
+    backgroundColor: '#2D7D7A',
+  },
+  timeMarkerText: {
+    fontSize: 12,
+    color: '#666',
+    fontWeight: '500',
+  },
+  selectedTimeMarkerText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  timeIndicatorLine: {
+    position: 'absolute',
+    width: 80,
+    height: 2,
+    backgroundColor: '#2D7D7A',
+    transformOrigin: '0 50%',
+  },
+  pickerActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E0E0E0',
+  },
+  pickerCancelButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 16,
+  },
+  pickerCancelText: {
+    fontSize: 14,
+    color: '#2D7D7A',
+    fontWeight: '500',
+  },
+  pickerOkButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  pickerOkText: {
+    fontSize: 14,
+    color: '#2D7D7A',
+    fontWeight: '500',
+  },
+  
+  // Modal Styles for Date/Time Pickers
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: 40,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: '#007AFF',
+  },
+  modalDoneText: {
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  dateTimePicker: {
+    height: 200,
+    backgroundColor: 'white',
+  },
+  
+  // Tag-specific styles
+  selectedTagsContainer: {
+    backgroundColor: 'white',
+    padding: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  selectedTagsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 10,
+    textTransform: 'uppercase',
+  },
+  selectedTagsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  selectedTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4A90E2',
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  selectedTagText: {
+    fontSize: 14,
+    color: 'white',
+    fontWeight: '500',
+  },
+  selectedTagRemove: {
+    fontSize: 16,
+    color: 'white',
+    marginLeft: 6,
+    fontWeight: 'bold',
+  },
+  selectedCategoryItem: {
+    backgroundColor: '#E3F2FD',
+  },
+  selectedCategoryName: {
+    color: '#1976D2',
+    fontWeight: '600',
+  },
+  categoryCheckmark: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#4CAF50',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryCheckmarkText: {
+    fontSize: 14,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  categoryEmptyState: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  categoryEmptyText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  categoryEmptySubtext: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
 });
