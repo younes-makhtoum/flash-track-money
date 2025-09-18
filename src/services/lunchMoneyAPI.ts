@@ -130,9 +130,12 @@ export class LunchMoneyAPI {
   // User info / validation
   async validateToken(): Promise<boolean> {
     try {
-      await this.request('/me');
+      console.log('Validating token with /me endpoint'); // Debug log
+      const response = await this.request('/me');
+      console.log('Token validation successful:', response); // Debug log
       return true;
-    } catch {
+    } catch (error) {
+      console.log('Token validation failed:', error); // Debug log
       return false;
     }
   }

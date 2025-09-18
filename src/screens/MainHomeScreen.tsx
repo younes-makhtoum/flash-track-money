@@ -10,8 +10,7 @@ import {
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
-import { ReceiptCapture } from '../components/ReceiptCapture';
-import { QuickExpenseEntry } from '../components/QuickExpenseEntry';
+
 import SettingsScreen from './SettingsScreen';
 import { useAppStore } from '../store/appStore';
 import { getLunchMoneyAPI } from '../services/lunchMoneyAPI';
@@ -66,13 +65,6 @@ export const MainHomeScreen: React.FC = () => {
       setLoading(true);
       setError(null); // Clear any previous errors
       
-      // Test connection first
-      const connectionTest = await testConnection();
-      if (!connectionTest) {
-        setError('Unable to connect to Lunch Money. Please check your API token.');
-        return;
-      }
-
       const api = getLunchMoneyAPI();
       
       // Load categories and tags with timeout
@@ -177,29 +169,29 @@ export const MainHomeScreen: React.FC = () => {
 
   if (screenMode === 'camera') {
     return (
-      <ReceiptCapture
-        onCapture={handleCapturePhoto}
-        onCancel={() => setScreenMode('home')}
-      />
+      <View style={styles.container}>
+        <Text style={styles.title}>Camera feature temporarily disabled</Text>
+        <TouchableOpacity 
+          style={styles.syncButton}
+          onPress={() => setScreenMode('home')}
+        >
+          <Text style={styles.syncButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
   if (screenMode === 'expense') {
     return (
-      <QuickExpenseEntry
-        onSubmit={handleSaveTransaction}
-        onCancel={() => {
-          setCapturedReceipt(null);
-          setScreenMode('home');
-        }}
-        initialData={capturedReceipt ? {
-          receipt: {
-            id: Date.now().toString(),
-            uri: capturedReceipt,
-            createdAt: new Date().toISOString(),
-          }
-        } : undefined}
-      />
+      <View style={styles.container}>
+        <Text style={styles.title}>Expense entry temporarily disabled</Text>
+        <TouchableOpacity 
+          style={styles.syncButton}
+          onPress={() => setScreenMode('home')}
+        >
+          <Text style={styles.syncButtonText}>Back to Home</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 

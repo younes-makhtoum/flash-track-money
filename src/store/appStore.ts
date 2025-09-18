@@ -47,7 +47,9 @@ export const useAppStore = create<AppState>()(
       setAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
       checkAuthStatus: async () => {
         try {
+          console.log('Checking auth status...'); // Debug log
           const hasToken = await isAPIConfigured();
+          console.log('Has token:', hasToken); // Debug log
           set({ isAuthenticated: hasToken });
         } catch (error) {
           console.error('Error checking auth status:', error);
