@@ -103,6 +103,108 @@ export default function App() {
     }
   };
 
+  const processTransferGroups = (transactions: any[], assetMap: { [key: string]: string } = {}) => {
+    // First, identify all group transactions (the main transfer entries)
+    const groupTransactions = transactions.filter((t: any) => t.is_group);
+    const groupIds = new Set(groupTransactions.map((t: any) => t.id));
+    
+    // Filter out individual transactions that are part of a group
+    const filteredTransactions = transactions.filter((t: any) => {
+      // Keep the transaction if:
+      // 1. It's not part of a group (group_id is null)
+      // 2. OR it's the main group transaction itself
+      return !t.group_id || groupIds.has(t.id);
+    });
+    
+    console.log(`🔄 Filtered ${transactions.length - filteredTransactions.length} individual transfer transactions`);
+    
+    // Now process the group transactions to show proper transfer info
+    const processedTransactions = filteredTransactions.map((transaction: any) => {
+      if (transaction.is_group && transaction.children && transaction.children.length >= 2) {
+        // This is a grouped transaction - check what type it actually is
+        const children = transaction.children;
+        
+        // Check if this is actually a transfer by looking at the main transaction category
+        const isTransfer = transaction.category_name === 'Transfer' || 
+                          transaction.category_name === 'Transfers' ||
+                          transaction.category === 'Transfer' ||
+                          transaction.category === 'Transfers';
+        
+        if (isTransfer) {
+          // Handle transfer groups
+          const debitChild = children.find((c: any) => parseFloat(c.amount || 0) < 0);
+          const creditChild = children.find((c: any) => parseFloat(c.amount || 0) > 0);
+          
+          if (debitChild && creditChild) {
+            const transferAmount = Math.abs(parseFloat(debitChild.amount || 0));
+            
+            // Get account names with better fallback logic
+            const fromAccount = assetMap[creditChild.asset_id?.toString()] || 
+                              assetMap[`plaid_${creditChild.plaid_account_id}`] ||
+                              creditChild.account_display_name || 
+                              creditChild.asset_display_name ||
+                              creditChild.plaid_account_display_name ||
+                              `Account ${creditChild.asset_id}` ||
+                              'Unknown Account';
+            const toAccount = assetMap[debitChild.asset_id?.toString()] || 
+                            assetMap[`plaid_${debitChild.plaid_account_id}`] ||
+                            debitChild.account_display_name || 
+                            debitChild.asset_display_name ||
+                            debitChild.plaid_account_display_name ||
+                            `Account ${debitChild.asset_id}` ||
+                            'Unknown Account';
+            
+            console.log(`🔄 Processing transfer: ${transferAmount} ${transaction.currency} from ${fromAccount} (credit: ${creditChild.amount}) to ${toAccount} (debit: ${debitChild.amount})`);
+            
+            return {
+              ...transaction,
+              payee: `Transfer: ${fromAccount} → ${toAccount}`,
+              amount: transferAmount,
+              is_transfer: true,
+              from_account: fromAccount,
+              to_account: toAccount,
+              account_display_name: `${fromAccount} → ${toAccount}`,
+              category_name: 'Transfer',
+            };
+          }
+        } else {
+          // Handle non-transfer groups (like payment + refund)
+          console.log(`📋 Processing non-transfer group: ${transaction.category_name} with ${children.length} children`);
+          
+          // For non-transfer groups, calculate net amount and collect dates
+          const totalAmount = parseFloat(transaction.amount || 0);
+          const dates = children.map((c: any) => c.date).filter(Boolean).sort();
+          const payees = children.map((c: any) => c.payee).filter(Boolean);
+          const mainChild = children.find((c: any) => Math.abs(parseFloat(c.amount || 0)) > Math.abs(totalAmount)) || children[0];
+          
+          // Get account name for the main transaction
+          const accountName = assetMap[mainChild?.asset_id?.toString()] || 
+                            assetMap[`plaid_${mainChild?.plaid_account_id}`] ||
+                            mainChild?.account_display_name || 
+                            mainChild?.asset_display_name ||
+                            mainChild?.plaid_account_display_name ||
+                            transaction.account_display_name ||
+                            'Unknown Account';
+          
+          return {
+            ...transaction,
+            account_display_name: accountName,
+            payee: transaction.payee || payees[0] || 'Unknown',
+            notes: transaction.notes || `Grouped transaction (${children.length} items)`,
+            is_grouped_non_transfer: true,
+            group_dates: dates,
+            group_children: children,
+            amount: Math.abs(totalAmount), // Always show positive amount for grouped transactions
+          };
+        }
+      }
+      
+      return transaction;
+    });
+    
+    return processedTransactions;
+  };
+
   const fetchTransactions = async () => {
     if (!token) return;
 
@@ -114,9 +216,36 @@ export default function App() {
       
       // First, let's fetch accounts to see what's available
       let accountsData;
+      let assetMap: { [key: string]: string } = {};
       try {
         accountsData = await callLunchMoneyAPI('/assets', token);
         console.log('🏦 Available assets/accounts:', accountsData);
+        
+        // Create a mapping of asset_id to display_name
+        if (accountsData && accountsData.assets) {
+          accountsData.assets.forEach((asset: any) => {
+            assetMap[asset.id.toString()] = asset.display_name || asset.name;
+          });
+          console.log('🗺️ Asset mapping:', assetMap);
+        }
+        
+        // Also try to get Plaid accounts which might have different IDs
+        try {
+          const plaidData = await callLunchMoneyAPI('/plaid_accounts', token);
+          console.log('🏦 Plaid accounts:', plaidData);
+          
+          if (plaidData && plaidData.plaid_accounts) {
+            plaidData.plaid_accounts.forEach((account: any) => {
+              // Map plaid_account_id to display_name for better account resolution
+              if (account.id && account.display_name) {
+                assetMap[`plaid_${account.id}`] = account.display_name;
+              }
+            });
+            console.log('🗺️ Updated asset mapping with Plaid accounts:', assetMap);
+          }
+        } catch (plaidError) {
+          console.log('ℹ️ Could not fetch Plaid accounts:', plaidError);
+        }
       } catch (accountError) {
         console.log('ℹ️ Could not fetch assets:', accountError);
       }
@@ -139,6 +268,19 @@ export default function App() {
       // Add regular transactions (which already include executed recurring transactions)
       if (transactionData && transactionData.transactions) {
         console.log(`📊 Found ${transactionData.transactions.length} regular transactions`);
+        
+        // Log a few sample transactions to understand the transfer structure
+        const sampleTransactions = transactionData.transactions.slice(0, 3);
+        console.log('📋 Sample transactions structure:', JSON.stringify(sampleTransactions, null, 2));
+        
+        // Check for transfer-related fields
+        const transferTransactions = transactionData.transactions.filter((t: any) => 
+          t.category === 'Transfer' || t.category_name === 'Transfer' || t.group_id || t.is_group
+        );
+        if (transferTransactions.length > 0) {
+          console.log('🔄 Transfer transactions found:', JSON.stringify(transferTransactions.slice(0, 2), null, 2));
+        }
+        
         allTransactions = [...transactionData.transactions];
         
         // Group by account for debugging
@@ -152,6 +294,10 @@ export default function App() {
         
         console.log('🏦 Regular transactions by account:', accountGroups);
         console.log(`🔄 Found ${recurringCount} transactions with recurring_id (recurring transactions)`);
+        
+        // Process transfer groups to combine grouped transfer transactions
+        allTransactions = processTransferGroups(allTransactions, assetMap);
+        console.log(`📊 After processing transfers: ${allTransactions.length} transactions`);
       }
       
       // Sort transactions by date (most recent first)
@@ -216,6 +362,65 @@ export default function App() {
     // Simple currency display - just use the currency code from API
     const currency = item.currency?.toUpperCase() || 'USD';
     
+    // Handle transfer transactions differently
+    if (item.is_transfer) {
+      const amount = parseFloat(item.amount || 0);
+      const displayAmount = Math.abs(amount);
+
+      return (
+        <View style={styles.transactionCard}>
+          <View style={styles.transactionHeader}>
+            <Text style={styles.payee}>{item.payee}</Text>
+            <Text style={[styles.amount, styles.transfer]}>
+              {currency} {displayAmount.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.transactionDetails}>
+            <Text style={styles.category}>Transfer</Text>
+            <Text style={styles.date}>{item.date}</Text>
+          </View>
+          <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
+          {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
+          <Text style={styles.transferIndicator}>↔️ Transfer</Text>
+        </View>
+      );
+    }
+    
+    // Handle grouped non-transfer transactions (like payment + refund)
+    if (item.is_grouped_non_transfer) {
+      const amount = parseFloat(item.amount || 0);
+      const displayAmount = Math.abs(amount);
+
+      return (
+        <View style={styles.transactionCard}>
+          <View style={styles.transactionHeader}>
+            <Text style={styles.payee}>{item.payee}</Text>
+            <Text style={[styles.amount, styles.grouped]}>
+              {currency} {displayAmount.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.transactionDetails}>
+            <Text style={styles.category}>{item.category_name || 'Grouped Transaction'}</Text>
+            <View style={styles.groupDates}>
+              {item.group_dates && item.group_dates.length > 1 && (
+                <>
+                  <Text style={styles.date}>Payment: {item.group_dates[0]}</Text>
+                  <Text style={styles.date}>Refund: {item.group_dates[item.group_dates.length - 1]}</Text>
+                </>
+              )}
+              {(!item.group_dates || item.group_dates.length <= 1) && (
+                <Text style={styles.date}>{item.date}</Text>
+              )}
+            </View>
+          </View>
+          <Text style={styles.account}>{item.account_display_name || 'Unknown Account'}</Text>
+          {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
+          <Text style={styles.groupIndicator}>📋 Grouped ({item.group_children?.length || 0} items)</Text>
+        </View>
+      );
+    }
+    
+    // Regular transaction rendering
     // Use API's is_income field if available, otherwise fall back to amount logic
     // The API provides is_income based on category properties
     const isIncome = item.is_income === true;
@@ -541,5 +746,28 @@ const styles = StyleSheet.create({
     color: '#6B73FF',
     fontStyle: 'italic',
     marginTop: 4,
+  },
+  transfer: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  transferIndicator: {
+    fontSize: 12,
+    color: '#FF9500',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  groupDates: {
+    flexDirection: 'column',
+  },
+  groupIndicator: {
+    fontSize: 12,
+    color: '#6B73FF',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  grouped: {
+    color: '#8E44AD',
+    fontWeight: '600',
   },
 });
