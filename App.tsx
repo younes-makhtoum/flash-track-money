@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Lunch Money API configuration
@@ -49,7 +49,12 @@ export default function App() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [selectedAccountData, setSelectedAccountData] = useState<any>(null);
+  const [selectedCategoryData, setSelectedCategoryData] = useState<any>(null);
+  const [selectedCategoryGroup, setSelectedCategoryGroup] = useState<any>(null);
+  const [categorySearchQuery, setCategorySearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
 
   // Keypad functions
   const handleKeypadInput = (input: string) => {
@@ -127,8 +132,9 @@ export default function App() {
     console.log('🔍 useEffect triggered - currentScreen:', currentScreen, 'token:', !!token, 'accounts length:', accounts.length);
     
     if (token && currentScreen === 'addTransaction') {
-      console.log('🚀 Triggering account fetch from useEffect');
+      console.log('🚀 Triggering account and category fetch from useEffect');
       fetchAccounts();
+      fetchCategories();
     }
   }, [token, currentScreen]);
 
@@ -290,6 +296,49 @@ export default function App() {
       setError('Failed to fetch accounts');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchCategories = async () => {
+    if (!token) {
+      console.log('❌ No token available for fetching categories');
+      return;
+    }
+    
+    try {
+      console.log('📂 Fetching categories for selection...');
+      const categoriesData = await callLunchMoneyAPI('/categories', token);
+      console.log('📂 Raw categories response:', categoriesData);
+      
+      if (categoriesData && categoriesData.categories) {
+        console.log('📂 All categories:', categoriesData.categories);
+        
+        // Debug: Log the structure of the first category to see available fields
+        if (categoriesData.categories.length > 0) {
+          console.log('🔍 First category structure:', JSON.stringify(categoriesData.categories[0], null, 2));
+          console.log('🔍 Available category fields:', Object.keys(categoriesData.categories[0]));
+        }
+        
+        // Filter for active categories (not archived)
+        const activeCategories = categoriesData.categories.filter((category: any) => {
+          // Most categories should be active by default, but let's check for archived flag
+          const isActive = !category.archived;
+          console.log(`Category ${category.name}: active=${isActive}, archived=${category.archived}`);
+          return isActive;
+        });
+        
+        console.log('📂 Filtered active categories:', activeCategories);
+        setCategories(activeCategories);
+        
+        if (activeCategories.length === 0) {
+          console.log('⚠️ No active categories found after filtering');
+        }
+      } else {
+        console.log('❌ No categories property in response');
+      }
+    } catch (error) {
+      console.log('❌ Error fetching categories:', error);
+      setError('Failed to fetch categories');
     }
   };
 
@@ -662,6 +711,261 @@ export default function App() {
     );
   }
 
+  // Category Selection Screen (Groups)
+  if (currentScreen === 'selectCategory') {
+    const categoryGroups = categories.filter(cat => cat.is_group === true);
+    // const mostFrequentCategories = categoryGroups.slice(0, 4); // First 4 as most frequent
+
+    return (
+      <View style={styles.categorySelectionContainer}>
+        {/* Header */}
+        <View style={styles.categorySelectionHeader}>
+          <TouchableOpacity 
+            style={styles.categoryBackButton}
+            onPress={() => setCurrentScreen('addTransaction')}
+          >
+            <Text style={styles.categoryBackText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.categorySelectionTitle}>Category</Text>
+          <TouchableOpacity 
+            style={styles.categorySearchButton}
+            onPress={() => {
+              setIsSearching(true);
+              setCurrentScreen('searchCategory');
+            }}
+          >
+            <Text style={styles.categorySearchText}>🔍</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.categoryContent}>
+          {/* Most Frequent Section - Commented out for now
+          <View style={styles.categorySection}>
+            <Text style={styles.categorySectionTitle}>MOST FREQUENT</Text>
+            <View style={styles.mostFrequentGrid}>
+              {mostFrequentCategories.map((category, index) => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={styles.mostFrequentItem}
+                  onPress={() => {
+                    setSelectedCategoryGroup(category);
+                    setCurrentScreen('selectSubcategory');
+                  }}
+                >
+                  <View style={[styles.mostFrequentIcon, { backgroundColor: category.color || '#4A90E2' }]}>
+                    <Text style={styles.mostFrequentIconText}>
+                      {category.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.mostFrequentName}>{category.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+          */}
+
+          {/* All Categories Section */}
+          <View style={styles.categorySection}>
+            <Text style={styles.categorySectionTitle}>ALL CATEGORIES</Text>
+            {categoryGroups.map((category) => (
+              <TouchableOpacity
+                key={category.id}
+                style={styles.categoryItem}
+                onPress={() => {
+                  setSelectedCategoryGroup(category);
+                  setCurrentScreen('selectSubcategory');
+                }}
+              >
+                <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
+                  <Text style={styles.categoryIconText}>
+                    {category.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <Text style={styles.categoryName}>{category.name}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Category Subcategory Selection Screen
+  if (currentScreen === 'selectSubcategory' && selectedCategoryGroup) {
+    const subcategories = categories.filter(cat => 
+      cat.group_id === selectedCategoryGroup.id && !cat.is_group
+    );
+
+    return (
+      <View style={styles.categorySelectionContainer}>
+        {/* Header */}
+        <View style={styles.categorySelectionHeader}>
+          <TouchableOpacity 
+            style={styles.categoryBackButton}
+            onPress={() => setCurrentScreen('selectCategory')}
+          >
+            <Text style={styles.categoryBackText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.categorySelectionTitle}>{selectedCategoryGroup.name}</Text>
+          <TouchableOpacity 
+            style={styles.categorySearchButton}
+            onPress={() => {
+              setIsSearching(true);
+              setCurrentScreen('searchCategory');
+            }}
+          >
+            <Text style={styles.categorySearchText}>🔍</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.categoryContent}>
+          {/* Show the group itself as selectable */}
+          <View style={styles.categorySection}>
+            <Text style={styles.categorySectionTitle}>GENERAL</Text>
+            <TouchableOpacity
+              style={styles.categoryItem}
+              onPress={() => {
+                console.log(`📂 Selected category group: ${selectedCategoryGroup.name}, is_income: ${selectedCategoryGroup.is_income}`);
+                setSelectedCategory(selectedCategoryGroup.id.toString());
+                setSelectedCategoryData(selectedCategoryGroup);
+                // Switch transaction type based on category's is_income property
+                const newTransactionType = selectedCategoryGroup.is_income ? 'income' : 'expense';
+                setTransactionType(newTransactionType);
+                console.log(`💰 Transaction type switched to: ${newTransactionType}`);
+                setCurrentScreen('addTransaction');
+              }}
+            >
+              <View style={[styles.categoryIcon, { backgroundColor: selectedCategoryGroup.color || '#4A90E2' }]}>
+                <Text style={styles.categoryIconText}>
+                  {selectedCategoryGroup.name.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <Text style={styles.categoryName}>{selectedCategoryGroup.name}</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Subcategories */}
+          {subcategories.length > 0 && (
+            <View style={styles.categorySection}>
+              <Text style={styles.categorySectionTitle}>SUBCATEGORIES</Text>
+              {subcategories.map((category) => (
+                <TouchableOpacity
+                  key={category.id}
+                  style={styles.categoryItem}
+                  onPress={() => {
+                    console.log(`📂 Selected subcategory: ${category.name}, is_income: ${category.is_income}`);
+                    setSelectedCategory(category.id.toString());
+                    setSelectedCategoryData(category);
+                    // Switch transaction type based on category's is_income property
+                    const newTransactionType = category.is_income ? 'income' : 'expense';
+                    setTransactionType(newTransactionType);
+                    console.log(`💰 Transaction type switched to: ${newTransactionType}`);
+                    setCurrentScreen('addTransaction');
+                  }}
+                >
+                  <View style={[styles.categoryIcon, { backgroundColor: category.color || selectedCategoryGroup.color || '#4A90E2' }]}>
+                    <Text style={styles.categoryIconText}>
+                      {category.name.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.categoryInfo}>
+                    <Text style={styles.categoryName}>{category.name}</Text>
+                    {category.description && (
+                      <Text style={styles.categoryDescription}>{category.description}</Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Category Search Screen
+  if (currentScreen === 'searchCategory') {
+    const allSearchableCategories = categories.filter(cat => !cat.is_group);
+    const filteredCategories = categorySearchQuery.trim() === '' 
+      ? allSearchableCategories
+      : allSearchableCategories.filter(cat =>
+          cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()) ||
+          (cat.description && cat.description.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+        );
+
+    return (
+      <View style={styles.categorySelectionContainer}>
+        {/* Header with Search */}
+        <View style={styles.categorySearchHeader}>
+          <TouchableOpacity 
+            style={styles.categoryBackButton}
+            onPress={() => {
+              setCurrentScreen('selectCategory');
+              setCategorySearchQuery('');
+              setIsSearching(false);
+            }}
+          >
+            <Text style={styles.categoryBackText}>←</Text>
+          </TouchableOpacity>
+          <TextInput
+            style={styles.categorySearchInput}
+            placeholder="Search for category..."
+            placeholderTextColor="#A0A0A0"
+            value={categorySearchQuery}
+            onChangeText={setCategorySearchQuery}
+            autoFocus={true}
+          />
+          <TouchableOpacity 
+            style={styles.categoryCloseButton}
+            onPress={() => {
+              setCurrentScreen('selectCategory');
+              setCategorySearchQuery('');
+              setIsSearching(false);
+            }}
+          >
+            <Text style={styles.categoryCloseText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.categoryContent}>
+          {filteredCategories.map((category) => {
+            const parentGroup = categories.find(cat => cat.id === category.group_id);
+            return (
+              <TouchableOpacity
+                key={category.id}
+                style={styles.categoryItem}
+                onPress={() => {
+                  console.log(`📂 Selected category: ${category.name}, is_income: ${category.is_income}`);
+                  setSelectedCategory(category.id.toString());
+                  setSelectedCategoryData(category);
+                  // Switch transaction type based on category's is_income property
+                  const newTransactionType = category.is_income ? 'income' : 'expense';
+                  setTransactionType(newTransactionType);
+                  console.log(`💰 Transaction type switched to: ${newTransactionType}`);
+                  setCurrentScreen('addTransaction');
+                  setCategorySearchQuery('');
+                  setIsSearching(false);
+                }}
+              >
+                <View style={[styles.categoryIcon, { backgroundColor: category.color || parentGroup?.color || '#4A90E2' }]}>
+                  <Text style={styles.categoryIconText}>
+                    {category.name.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.categoryInfo}>
+                  <Text style={styles.categoryName}>{category.name}</Text>
+                  {parentGroup && (
+                    <Text style={styles.categoryDescription}>{parentGroup.name}</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+    );
+  }
+
   // Add Transaction Screen
   if (currentScreen === 'addTransaction') {
     return (
@@ -730,10 +1034,13 @@ export default function App() {
             </Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.card}>
+          <TouchableOpacity 
+            style={styles.card}
+            onPress={() => setCurrentScreen('selectCategory')}
+          >
             <Text style={styles.cardLabel}>Category</Text>
             <Text style={styles.cardValue}>
-              {selectedCategory || 'Select category'}
+              {selectedCategoryData ? selectedCategoryData.name : 'Select category'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -1317,5 +1624,150 @@ const styles = StyleSheet.create({
     color: '#2D7D7A',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  
+  // Category Selection Styles
+  categorySelectionContainer: {
+    flex: 1,
+    backgroundColor: '#F8F9FA',
+  },
+  categorySelectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#2D7D7A',
+  },
+  categoryBackButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryBackText: {
+    fontSize: 24,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  categorySelectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  categorySearchButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categorySearchText: {
+    fontSize: 20,
+    color: 'white',
+  },
+  categoryContent: {
+    flex: 1,
+  },
+  categorySection: {
+    marginBottom: 20,
+  },
+  categorySectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8E8E93',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: '#F0F0F0',
+    textTransform: 'uppercase',
+  },
+  mostFrequentGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  mostFrequentItem: {
+    width: '25%',
+    alignItems: 'center',
+    paddingVertical: 15,
+  },
+  mostFrequentIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  mostFrequentIconText: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  mostFrequentName: {
+    fontSize: 12,
+    textAlign: 'center',
+    color: '#333',
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  categoryIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  categoryIconText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  categoryName: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+  },
+  categoryInfo: {
+    flex: 1,
+  },
+  categoryDescription: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 2,
+  },
+  categorySearchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 50,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#2D7D7A',
+  },
+  categorySearchInput: {
+    flex: 1,
+    fontSize: 18,
+    color: 'white',
+    marginHorizontal: 15,
+    paddingVertical: 5,
+  },
+  categoryCloseButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  categoryCloseText: {
+    fontSize: 20,
+    color: 'white',
   },
 });
