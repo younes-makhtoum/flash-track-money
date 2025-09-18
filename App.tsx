@@ -42,6 +42,36 @@ export default function App() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Add Transaction state
+  const [transactionType, setTransactionType] = useState<'expense' | 'income'>('expense');
+  const [amount, setAmount] = useState('0');
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [selectedAccountData, setSelectedAccountData] = useState<any>(null);
+
+  // Keypad functions
+  const handleKeypadInput = (input: string) => {
+    setAmount(prev => {
+      if (prev === '0' && input !== '.') {
+        return input;
+      }
+      if (input === '.' && prev.includes('.')) {
+        return prev;
+      }
+      return prev + input;
+    });
+  };
+
+  const handleKeypadBackspace = () => {
+    setAmount(prev => {
+      if (prev.length <= 1) {
+        return '0';
+      }
+      return prev.slice(0, -1);
+    });
+  };
 
   // Sample transaction data (will be replaced with API data)
   const sampleTransactions = [
@@ -89,6 +119,16 @@ export default function App() {
   useEffect(() => {
     if (token && currentScreen === 'transactions') {
       fetchTransactions();
+    }
+  }, [token, currentScreen]);
+
+  // Load accounts when entering add transaction screen
+  useEffect(() => {
+    console.log('🔍 useEffect triggered - currentScreen:', currentScreen, 'token:', !!token, 'accounts length:', accounts.length);
+    
+    if (token && currentScreen === 'addTransaction') {
+      console.log('🚀 Triggering account fetch from useEffect');
+      fetchAccounts();
     }
   }, [token, currentScreen]);
 
@@ -205,6 +245,54 @@ export default function App() {
     return processedTransactions;
   };
 
+  const fetchAccounts = async () => {
+    if (!token) {
+      console.log('❌ No token available for fetching accounts');
+      return;
+    }
+    
+    try {
+      console.log('🏦 Fetching accounts for selection...');
+      setIsLoading(true);
+      const accountsData = await callLunchMoneyAPI('/assets', token);
+      console.log('🏦 Raw accounts response:', accountsData);
+      
+      if (accountsData && accountsData.assets) {
+        console.log('🏦 All assets:', accountsData.assets);
+        
+        // Debug: Log the structure of the first asset to see available fields
+        if (accountsData.assets.length > 0) {
+          console.log('🔍 First asset structure:', JSON.stringify(accountsData.assets[0], null, 2));
+          console.log('🔍 Available fields:', Object.keys(accountsData.assets[0]));
+        }
+        
+        // Filter for physical cash assets that are active (closed_on is null)
+        const physicalCashAccounts = accountsData.assets.filter((asset: any) => {
+          const isPhysicalCash = asset.subtype_name === "physical cash";
+          const isActive = asset.closed_on === null; // Active accounts have closed_on = null
+          
+          console.log(`Account ${asset.name}: subtype_name="${asset.subtype_name}", physical_cash=${isPhysicalCash}, active=${isActive}, closed_on=${asset.closed_on}`);
+          console.log(`🔍 Full asset object:`, asset);
+          return isPhysicalCash && isActive;
+        });
+        
+        console.log('� Filtered physical cash accounts:', physicalCashAccounts);
+        setAccounts(physicalCashAccounts);
+        
+        if (physicalCashAccounts.length === 0) {
+          console.log('⚠️ No physical cash accounts found after filtering');
+        }
+      } else {
+        console.log('❌ No assets property in response');
+      }
+    } catch (error) {
+      console.log('❌ Error fetching accounts:', error);
+      setError('Failed to fetch accounts');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const fetchTransactions = async () => {
     if (!token) return;
 
@@ -221,8 +309,15 @@ export default function App() {
         accountsData = await callLunchMoneyAPI('/assets', token);
         console.log('🏦 Available assets/accounts:', accountsData);
         
-        // Create a mapping of asset_id to display_name
+        // Create a mapping of asset_id to display_name and store accounts
         if (accountsData && accountsData.assets) {
+          // Filter for non-Plaid accounts only (manual accounts)
+          const manualAccounts = accountsData.assets.filter((asset: any) => 
+            !asset.plaid_account_id && asset.status === 'active'
+          );
+          setAccounts(manualAccounts);
+          console.log('📱 Manual accounts for selection:', manualAccounts);
+          
           accountsData.assets.forEach((asset: any) => {
             assetMap[asset.id.toString()] = asset.display_name || asset.name;
           });
@@ -493,6 +588,210 @@ export default function App() {
     );
   }
 
+  // Account Selection Screen
+  if (currentScreen === 'selectAccount') {
+    return (
+      <View style={styles.accountSelectionContainer}>
+        {/* Header */}
+        <View style={styles.accountSelectionHeader}>
+          <TouchableOpacity 
+            style={styles.accountBackButton}
+            onPress={() => setCurrentScreen('addTransaction')}
+          >
+            <Text style={styles.accountBackText}>←</Text>
+          </TouchableOpacity>
+          <Text style={styles.accountSelectionTitle}>Account</Text>
+          <TouchableOpacity style={styles.accountSettingsButton}>
+            <Text style={styles.accountSettingsText}>⚙</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Account List */}
+        <View style={styles.accountList}>
+          {isLoading ? (
+            <View style={styles.noAccountsContainer}>
+              <Text style={styles.noAccountsText}>Loading accounts...</Text>
+            </View>
+          ) : accounts.length === 0 ? (
+            <View style={styles.noAccountsContainer}>
+              <Text style={styles.noAccountsText}>
+                {token ? 'No manual accounts found' : 'No API token configured'}
+              </Text>
+              <Text style={styles.noAccountsText}>
+                Check console for debugging info
+              </Text>
+            </View>
+          ) : (
+            <>
+              <View style={styles.accountCountContainer}>
+                <Text style={styles.accountCountText}>
+                  {accounts.length} account{accounts.length !== 1 ? 's' : ''} available
+                </Text>
+              </View>
+              {accounts.map((account) => {
+                const accountTypeDisplay = account.type_name || 'Cash';
+                const accountIcon = account.type_name?.toLowerCase().includes('cash') ? '💵' : '🏦';
+                
+                return (
+                  <TouchableOpacity
+                    key={account.id}
+                    style={styles.accountItem}
+                    onPress={() => {
+                      console.log('🏦 Selected account:', account);
+                      setSelectedAccount(account.id.toString());
+                      setSelectedAccountData(account);
+                      setCurrentScreen('addTransaction');
+                    }}
+                  >
+                    <View style={styles.accountIconContainer}>
+                      <Text style={styles.accountIcon}>{accountIcon}</Text>
+                    </View>
+                    <View style={styles.accountInfo}>
+                      <Text style={styles.accountName}>
+                        {account.display_name || account.name}
+                      </Text>
+                      <Text style={styles.accountType}>{accountTypeDisplay}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Add Transaction Screen
+  if (currentScreen === 'addTransaction') {
+    return (
+      <View style={[
+        styles.walletContainer,
+        transactionType === 'expense' ? styles.expenseBackground : styles.incomeBackground
+      ]}>
+        {/* Header with back button */}
+        <View style={styles.walletHeader}>
+          <TouchableOpacity 
+            style={styles.walletBackButton}
+            onPress={() => setCurrentScreen('home')}
+          >
+            <Text style={styles.walletBackText}>✕</Text>
+          </TouchableOpacity>
+          <Text style={styles.walletTitle}>Add Transaction</Text>
+          <View style={styles.walletBackButton}></View>
+        </View>
+
+        {/* Transaction Type Tabs */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tab, transactionType === 'expense' && styles.activeTab]}
+            onPress={() => setTransactionType('expense')}
+          >
+            <Text style={[styles.tabText, transactionType === 'expense' && styles.activeTabText]}>
+              EXPENSE
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tab, transactionType === 'income' && styles.activeTab]}
+            onPress={() => setTransactionType('income')}
+          >
+            <Text style={[styles.tabText, transactionType === 'income' && styles.activeTabText]}>
+              INCOME
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Amount Display */}
+        <View style={styles.amountSection}>
+          <Text style={[styles.signSymbol, transactionType === 'expense' ? styles.negativeSign : styles.positiveSign]}>
+            {transactionType === 'expense' ? '-' : '+'}
+          </Text>
+          <Text style={styles.currencySymbol}>
+            {selectedAccountData?.currency === 'eur' ? '€' : 
+             selectedAccountData?.currency === 'mad' ? 'MAD' : 
+             selectedAccountData?.currency === 'usd' ? '$' : '$'}
+          </Text>
+          <Text style={styles.amountText}>{amount}</Text>
+        </View>
+
+        {/* Account and Category Cards */}
+        <View style={styles.cardSection}>
+          <TouchableOpacity 
+            style={styles.card}
+            onPress={() => setCurrentScreen('selectAccount')}
+          >
+            <Text style={styles.cardLabel}>Account</Text>
+            <Text style={styles.cardValue}>
+              {selectedAccountData ? 
+                `${selectedAccountData.display_name || selectedAccountData.name}` : 
+                'Select account'
+              }
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity style={styles.card}>
+            <Text style={styles.cardLabel}>Category</Text>
+            <Text style={styles.cardValue}>
+              {selectedCategory || 'Select category'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Numeric Keypad */}
+        <View style={styles.keypad}>
+          <View style={styles.keypadRow}>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('1')}>
+              <Text style={styles.keypadButtonText}>1</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('2')}>
+              <Text style={styles.keypadButtonText}>2</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('3')}>
+              <Text style={styles.keypadButtonText}>3</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.keypadRow}>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('4')}>
+              <Text style={styles.keypadButtonText}>4</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('5')}>
+              <Text style={styles.keypadButtonText}>5</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('6')}>
+              <Text style={styles.keypadButtonText}>6</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.keypadRow}>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('7')}>
+              <Text style={styles.keypadButtonText}>7</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('8')}>
+              <Text style={styles.keypadButtonText}>8</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('9')}>
+              <Text style={styles.keypadButtonText}>9</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.keypadRow}>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('.')}>
+              <Text style={styles.keypadButtonText}>.</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('0')}>
+              <Text style={styles.keypadButtonText}>0</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.keypadButton} onPress={handleKeypadBackspace}>
+              <Text style={styles.keypadButtonText}>⌫</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   // Settings Screen
   if (currentScreen === 'settings') {
     return (
@@ -547,6 +846,13 @@ export default function App() {
     <View style={styles.container}>
       <Text style={styles.text}>Flash Track Money</Text>
       <Text style={styles.subtitle}>Ready to track expenses!</Text>
+      
+      <TouchableOpacity 
+        style={styles.button} 
+        onPress={() => setCurrentScreen('addTransaction')}
+      >
+        <Text style={styles.buttonText}>Add Transaction</Text>
+      </TouchableOpacity>
       
       <TouchableOpacity 
         style={styles.button} 
@@ -769,5 +1075,247 @@ const styles = StyleSheet.create({
   grouped: {
     color: '#8E44AD',
     fontWeight: '600',
+  },
+  
+  // Wallet-style Add Transaction styles
+  walletContainer: {
+    flex: 1,
+    backgroundColor: '#2D7D7A', // Default color, will be overridden
+    paddingTop: 35, // Reduced from 50
+  },
+  expenseBackground: {
+    backgroundColor: '#FFE5E5', // Light red for expenses
+  },
+  incomeBackground: {
+    backgroundColor: '#E5F5E5', // Light green for income
+  },
+  walletHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 5, // Reduced from 10
+  },
+  walletBackButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  walletBackText: {
+    color: '#333',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  walletTitle: {
+    color: '#333',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    marginHorizontal: 20,
+    marginTop: 5, // Reduced from default
+    marginBottom: 8, // Reduced from 15
+    borderRadius: 12,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 6, // Reduced from 8
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: 'white',
+  },
+  tabText: {
+    color: '#333',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  activeTabText: {
+    color: '#333',
+  },
+  amountSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10, // Reduced from 15
+  },
+  signSymbol: {
+    fontSize: 40,
+    fontWeight: '300',
+    marginRight: 8,
+  },
+  positiveSign: {
+    color: '#4CAF50', // Green for income
+  },
+  negativeSign: {
+    color: '#F44336', // Red for expense
+  },
+  currencySymbol: {
+    color: '#333',
+    fontSize: 40,
+    fontWeight: '300',
+    marginRight: 8,
+  },
+  amountText: {
+    color: '#333',
+    fontSize: 48,
+    fontWeight: '300',
+  },
+  cardSection: {
+    paddingHorizontal: 20,
+    marginBottom: 8, // Reduced from 10
+  },
+  card: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 12,
+    padding: 12, // Reduced from 14
+    marginBottom: 6, // Reduced from 8
+  },
+  cardLabel: {
+    color: 'rgba(0,0,0,0.6)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  cardValue: {
+    color: '#333',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  keypad: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 8, // Reduced from 12
+    paddingHorizontal: 20,
+    paddingBottom: 20, // Added bottom padding to ensure visibility
+    flex: 1,
+  },
+  keypadRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6, // Reduced from 8
+  },
+  keypadButton: {
+    flex: 1,
+    aspectRatio: 1,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 6,
+  },
+  keypadButtonText: {
+    fontSize: 24,
+    fontWeight: '500',
+    color: '#333',
+  },
+  
+  // Account Selection Screen styles
+  accountSelectionContainer: {
+    flex: 1,
+    backgroundColor: '#2D7D7A',
+  },
+  accountSelectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 20,
+    backgroundColor: '#2D7D7A',
+  },
+  accountBackButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  accountBackText: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  accountSelectionTitle: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+  accountSettingsButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  accountSettingsText: {
+    color: 'white',
+    fontSize: 20,
+  },
+  accountList: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+    paddingTop: 0,
+  },
+  accountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  accountIconContainer: {
+    width: 50,
+    height: 50,
+    borderRadius: 8,
+    backgroundColor: '#2D7D7A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  accountIcon: {
+    fontSize: 20,
+  },
+  accountInfo: {
+    flex: 1,
+  },
+  accountName: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 2,
+  },
+  accountType: {
+    fontSize: 14,
+    color: '#666',
+  },
+  noAccountsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100,
+  },
+  noAccountsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  accountCountContainer: {
+    padding: 16,
+    backgroundColor: 'rgba(45, 125, 122, 0.1)',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  accountCountText: {
+    fontSize: 14,
+    color: '#2D7D7A',
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
