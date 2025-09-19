@@ -32,12 +32,11 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
   useEffect(() => {
     checkExistingToken();
     loadCurrencyPreference();
+    updateAvailableCurrencies(); // Always initialize currencies
   }, []);
 
   useEffect(() => {
-    if (accounts && accounts.length > 0) {
-      updateAvailableCurrencies();
-    }
+    updateAvailableCurrencies(); // Update when accounts change
   }, [accounts]);
 
   const checkExistingToken = async () => {
@@ -66,12 +65,14 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
   };
 
   const updateAvailableCurrencies = () => {
-    // Extract unique currencies from accounts
-    const currencies = [...new Set(accounts.map(account => account.currency))];
-    setAvailableCurrencies(currencies);
-    
-    // If no currency is selected but we have currencies available, don't auto-select
-    // Let user manually choose their preferred currency
+    // Only show currencies from actual API accounts
+    if (accounts && accounts.length > 0) {
+      const accountCurrencies = [...new Set(accounts.map(account => account.currency.toLowerCase()))];
+      setAvailableCurrencies(accountCurrencies);
+    } else {
+      // Clear currencies when no accounts are available
+      setAvailableCurrencies([]);
+    }
   };
 
   const getCurrencyDisplayName = (currency: string): string => {
@@ -167,14 +168,12 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.title}>Lunch Money Settings</Text>
-        
-        {/* Currency Location Section - Only visible when token is saved and accounts are available */}
-        {hasExistingToken && availableCurrencies.length > 0 && (
+        {/* Currency Location Section - Only visible when token exists AND accounts are available */}
+        {hasExistingToken && accounts && accounts.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Currency Location</Text>
             <Text style={styles.description}>
-              Select your primary currency zone. This will automatically pre-select the corresponding account when creating new transactions.
+              Select your primary currency zone from your available accounts. This will automatically pre-select the corresponding account when creating new transactions.
             </Text>
             
             <View style={styles.currencyOptions}>
@@ -198,9 +197,6 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
         
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>API Token</Text>
-          <Text style={styles.description}>
-            Enter your Lunch Money API token to sync transactions. You can find this in your Lunch Money account under Settings → API.
-          </Text>
           
           <TextInput
             style={styles.input}
@@ -261,13 +257,6 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-    color: '#333',
   },
   section: {
     backgroundColor: '#fff',

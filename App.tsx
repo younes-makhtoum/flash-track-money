@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform, Image } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import SettingsScreen from './src/screens/SettingsScreen';
@@ -42,7 +43,7 @@ const callLunchMoneyAPI = async (endpoint: string, token: string) => {
 };
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('home');
+  const [currentScreen, setCurrentScreen] = useState('transactions');
   const [token, setToken] = useState('');
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -247,6 +248,11 @@ export default function App() {
       const savedToken = await SecureStorage.getLunchMoneyToken();
       if (savedToken) {
         setToken(savedToken);
+      }
+      // Also load currency preference
+      const savedCurrency = await SecureStorage.getCurrencyPreference();
+      if (savedCurrency) {
+        setSelectedCurrency(savedCurrency);
       }
     } catch (error) {
       console.error('Error loading token:', error);
@@ -634,21 +640,13 @@ export default function App() {
         await linkAttachmentsToTransaction(createdTransactionId);
       }
       
-      // Show success message
-      Alert.alert(
-        'Success',
-        'Transaction saved successfully!',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Reset form and navigate back
-              resetTransactionForm();
-              setCurrentScreen('addTransaction');
-            }
-          }
-        ]
-      );
+      // Reset form and navigate back to transactions
+      resetTransactionForm();
+      setCurrentScreen('transactions');
+      // Refresh transactions to show the new one
+      if (token) {
+        fetchTransactions();
+      }
       
     } catch (error) {
       console.log('❌ Error saving transaction:', error);
@@ -851,8 +849,7 @@ export default function App() {
         
         // Save token if valid
         await SecureStorage.setLunchMoneyToken(token.trim());
-        Alert.alert('Success!', 'Token saved successfully');
-        setCurrentScreen('home');
+        setCurrentScreen('transactions');
       } catch (error) {
         console.error('Token validation failed:', error);
         let errorMessage = 'Invalid token. Please check and try again.';
@@ -976,39 +973,85 @@ export default function App() {
 
   // Transactions Screen
   if (currentScreen === 'transactions') {
-    const dataToShow = transactions.length > 0 ? transactions : sampleTransactions;
-    
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => setCurrentScreen('home')}>
-            <Text style={styles.backButton}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Recent Transactions</Text>
-          <TouchableOpacity onPress={fetchTransactions}>
-            <Text style={styles.refreshButton}>↻</Text>
+        {/* Fixed Top Banner */}
+        <View style={styles.topBanner}>
+          <Text style={styles.appName}>⚡Flash Track Money</Text>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => setCurrentScreen('settings')}
+          >
+            <Text style={styles.settingsIcon}>⚙️</Text>
           </TouchableOpacity>
         </View>
-        
-        {error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-        
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Loading transactions...</Text>
+
+        {/* Content Area */}
+        {!token ? (
+          // Placeholder when no token
+          <View style={styles.placeholderContainer}>
+            <View style={styles.placeholderContent}>
+              <Text style={styles.placeholderIcon}>💳</Text>
+              <Text style={styles.placeholderTitle}>Welcome to Flash Track Money!</Text>
+              <Text style={styles.placeholderDescription}>
+                Connect your Lunch Money account to start tracking expenses and managing your finances on the go.
+              </Text>
+              
+              <View style={styles.placeholderButtons}>
+                <TouchableOpacity 
+                  style={styles.placeholderPrimaryButton}
+                  onPress={() => setCurrentScreen('settings')}
+                >
+                  <Text style={styles.placeholderPrimaryButtonText}>Connect Lunch Money</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
         ) : (
-          <FlatList
-            data={dataToShow}
-            renderItem={renderTransaction}
-            keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
-            style={styles.transactionsList}
-            showsVerticalScrollIndicator={false}
-          />
+          // Regular transactions view when token exists
+          <>
+            {error && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            )}
+            
+            {isLoading ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#007AFF" />
+                <Text style={styles.loadingText}>Loading transactions...</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.sectionTitleContainer}>
+                  <Text style={styles.sectionTitle}>Recent Transactions</Text>
+                  {!token && (
+                    <View style={styles.tokenWarning}>
+                      <Text style={styles.tokenWarningText}>⚠️ Token missing - no sync active</Text>
+                    </View>
+                  )}
+                </View>
+                <FlatList
+                  data={transactions.length > 0 ? transactions : sampleTransactions}
+                  renderItem={renderTransaction}
+                  keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
+                  style={styles.mainTransactionsList}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.transactionsListContent}
+                />
+              </>
+            )}
+          </>
+        )}
+
+        {/* Floating Action Button - Only show when token exists */}
+        {token && (
+          <TouchableOpacity 
+            style={styles.fab}
+            onPress={() => setCurrentScreen('addTransaction')}
+          >
+            <Text style={styles.fabIcon}>+</Text>
+          </TouchableOpacity>
         )}
       </View>
     );
@@ -1017,18 +1060,18 @@ export default function App() {
   // Account Selection Screen
   if (currentScreen === 'selectAccount') {
     return (
-      <View style={styles.accountSelectionContainer}>
-        {/* Header */}
-        <View style={styles.accountSelectionHeader}>
+      <View style={styles.container}>
+        {/* Fixed Top Banner - Same as main screen */}
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>👛</Text>
+            <Text style={styles.appName}>Pick account</Text>
+          </View>
           <TouchableOpacity 
-            style={styles.accountBackButton}
+            style={styles.settingsButton}
             onPress={() => setCurrentScreen('addTransaction')}
           >
-            <Text style={styles.accountBackText}>←</Text>
-          </TouchableOpacity>
-          <Text style={styles.accountSelectionTitle}>Account</Text>
-          <TouchableOpacity style={styles.accountSettingsButton}>
-            <Text style={styles.accountSettingsText}>⚙</Text>
+            <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
         </View>
 
@@ -1062,10 +1105,21 @@ export default function App() {
                   <TouchableOpacity
                     key={account.id}
                     style={styles.accountItem}
-                    onPress={() => {
+                    onPress={async () => {
                       console.log('🏦 Selected account:', account);
                       setSelectedAccount(account.id.toString());
                       setSelectedAccountData(account);
+                      
+                      // Update currency preference based on selected account
+                      if (account.currency) {
+                        try {
+                          await SecureStorage.setCurrencyPreference(account.currency);
+                          console.log('💰 Updated currency preference to:', account.currency);
+                        } catch (error) {
+                          console.error('Error updating currency preference:', error);
+                        }
+                      }
+                      
                       setCurrentScreen('addTransaction');
                     }}
                   >
@@ -1091,28 +1145,41 @@ export default function App() {
   // Category Selection Screen (Groups)
   if (currentScreen === 'selectCategory') {
     const categoryGroups = categories.filter(cat => cat.is_group === true);
-    // const mostFrequentCategories = categoryGroups.slice(0, 4); // First 4 as most frequent
+    
+    // Filter categories based on search query
+    const filteredCategoryGroups = categorySearchQuery.trim() === '' 
+      ? categoryGroups 
+      : categoryGroups.filter(cat => 
+          cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()) ||
+          (cat.description && cat.description.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+        );
 
     return (
       <View style={styles.categorySelectionContainer}>
         {/* Header */}
-        <View style={styles.categorySelectionHeader}>
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>🔀</Text>
+            <Text style={styles.appName}>Pick category</Text>
+          </View>
           <TouchableOpacity 
-            style={styles.categoryBackButton}
+            style={styles.settingsButton}
             onPress={() => setCurrentScreen('addTransaction')}
           >
-            <Text style={styles.categoryBackText}>←</Text>
+            <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
-          <Text style={styles.categorySelectionTitle}>Category</Text>
-          <TouchableOpacity 
-            style={styles.categorySearchButton}
-            onPress={() => {
-              setIsSearching(true);
-              setCurrentScreen('searchCategory');
-            }}
-          >
-            <Text style={styles.categorySearchText}>🔍</Text>
-          </TouchableOpacity>
+        </View>
+
+        {/* Search Section */}
+        <View style={styles.searchBanner}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search"
+            value={categorySearchQuery}
+            onChangeText={setCategorySearchQuery}
+            placeholderTextColor="#666"
+          />
         </View>
 
         <ScrollView style={styles.categoryContent}>
@@ -1127,7 +1194,7 @@ export default function App() {
             </TouchableOpacity>
             {expensesExpanded && (
               <View>
-                {categoryGroups
+                {filteredCategoryGroups
                   .filter(cat => !cat.is_income) // Expense categories
                   .map((category) => (
                     <TouchableOpacity
@@ -1161,7 +1228,7 @@ export default function App() {
             </TouchableOpacity>
             {incomesExpanded && (
               <View>
-                {categoryGroups
+                {filteredCategoryGroups
                   .filter(cat => cat.is_income) // Income categories
                   .map((category) => (
                     <TouchableOpacity
@@ -1193,34 +1260,48 @@ export default function App() {
     const subcategories = categories.filter(cat => 
       cat.group_id === selectedCategoryGroup.id && !cat.is_group
     );
+    
+    // Filter subcategories based on search query
+    const filteredSubcategories = categorySearchQuery.trim() === '' 
+      ? subcategories 
+      : subcategories.filter(cat => 
+          cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()) ||
+          (cat.description && cat.description.toLowerCase().includes(categorySearchQuery.toLowerCase()))
+        );
 
     return (
       <View style={styles.categorySelectionContainer}>
         {/* Header */}
-        <View style={styles.categorySelectionHeader}>
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>📂</Text>
+            <Text style={styles.appName}>{selectedCategoryGroup.name}</Text>
+          </View>
           <TouchableOpacity 
-            style={styles.categoryBackButton}
+            style={styles.settingsButton}
             onPress={() => setCurrentScreen('selectCategory')}
           >
-            <Text style={styles.categoryBackText}>←</Text>
+            <Text style={styles.closeIcon}>←</Text>
           </TouchableOpacity>
-          <Text style={styles.categorySelectionTitle}>{selectedCategoryGroup.name}</Text>
-          <TouchableOpacity 
-            style={styles.categorySearchButton}
-            onPress={() => {
-              setIsSearching(true);
-              setCurrentScreen('searchCategory');
-            }}
-          >
-            <Text style={styles.categorySearchText}>🔍</Text>
-          </TouchableOpacity>
+        </View>
+
+        {/* Search Section */}
+        <View style={styles.searchBanner}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search"
+            value={categorySearchQuery}
+            onChangeText={setCategorySearchQuery}
+            placeholderTextColor="#666"
+          />
         </View>
 
         <ScrollView style={styles.categoryContent}>
           {/* Only show subcategories - no category group selection allowed */}
-          {subcategories.length > 0 ? (
+          {filteredSubcategories.length > 0 ? (
             <View style={styles.categorySection}>
-              {subcategories.map((category) => (
+              {filteredSubcategories.map((category) => (
                 <TouchableOpacity
                   key={category.id}
                   style={styles.categoryItem}
@@ -1475,25 +1556,25 @@ export default function App() {
   // Transaction Details Screen
   if (currentScreen === 'transactionDetails') {
     return (
-      <>
-        <View style={styles.transactionDetailsContainer}>
-          {/* Header */}
-          <View style={styles.transactionDetailsHeader}>
-            <TouchableOpacity 
-              style={styles.detailsBackButton}
-              onPress={() => setCurrentScreen('addTransaction')}
-            >
-              <Text style={styles.detailsBackText}>←</Text>
-            </TouchableOpacity>
-            <Text style={styles.transactionDetailsTitle}>
-              {selectedAccountData?.currency === 'eur' ? '€' : 
-               selectedAccountData?.currency === 'mad' ? 'MAD' : 
-               selectedAccountData?.currency === 'usd' ? '$' : '$'} {amount}
-            </Text>
-            <View style={styles.detailsHeaderSpacer} />
+      <View style={[
+        styles.transactionDetailsContainer,
+        selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
+      ]}>
+        {/* Header */}
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>ℹ️</Text>
+            <Text style={styles.appName}>Transaction details</Text>
           </View>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => setCurrentScreen('addTransaction')}
+          >
+            <Text style={styles.closeIcon}>✕</Text>
+          </TouchableOpacity>
+        </View>
 
-          <ScrollView style={styles.transactionDetailsContent}>
+        <ScrollView style={styles.transactionDetailsContent}>
             {/* Note Section */}
             <View style={styles.detailsSection}>
               <Text style={styles.detailsLabel}>NOTES</Text>
@@ -1510,7 +1591,7 @@ export default function App() {
 
             {/* Payee Section */}
             <View style={styles.detailsSection}>
-              <Text style={styles.detailsLabel}>Payee</Text>
+              <Text style={styles.detailsLabel}>PAYEE</Text>
               <TextInput
                 style={styles.detailsInput}
                 placeholder="Enter payee name"
@@ -1523,7 +1604,7 @@ export default function App() {
             {/* Date and Time Section */}
             <View style={styles.detailsRow}>
               <View style={styles.detailsHalfSection}>
-                <Text style={styles.detailsLabel}>Date</Text>
+                <Text style={styles.detailsLabel}>DATE</Text>
                 <TouchableOpacity 
                   style={styles.detailsDateButton}
                   onPress={() => setShowDatePicker(true)}
@@ -1535,7 +1616,7 @@ export default function App() {
                 </TouchableOpacity>
               </View>
               <View style={styles.detailsHalfSection}>
-                <Text style={styles.detailsLabel}>Time</Text>
+                <Text style={styles.detailsLabel}>TIME</Text>
                 <TouchableOpacity 
                   style={styles.detailsDateButton}
                   onPress={() => setShowTimePicker(true)}
@@ -1550,7 +1631,7 @@ export default function App() {
 
           {/* Tags Section - Moved here */}
           <View style={styles.detailsSection}>
-            <Text style={styles.detailsLabel}>Tags</Text>
+            <Text style={styles.detailsLabel}>TAGS</Text>
             {transactionTags.length > 0 ? (
               <View>
                 <View style={styles.selectedTagsList}>
@@ -1579,7 +1660,7 @@ export default function App() {
 
           {/* Receipt Section */}
           <View style={styles.detailsSection}>
-            <Text style={styles.detailsLabel}>Attachments</Text>
+            <Text style={styles.detailsLabel}>ATTACHMENTS</Text>
             
             {/* Display existing attachments */}
             {transactionAttachments.length > 0 && (
@@ -1622,8 +1703,7 @@ export default function App() {
               <Text style={styles.addReceiptText}>ADD RECEIPT</Text>
             </TouchableOpacity>
           </View>
-          </ScrollView>
-        </View>
+        </ScrollView>
 
         {/* Date Picker Modal */}
         {Platform.OS === 'ios' ? (
@@ -1739,160 +1819,166 @@ export default function App() {
           onClose={() => setShowReceiptGallery(false)}
           onDeleteAttachment={handleDeleteFromGallery}
         />
-      </>
+      </View>
     );
   }
 
   // Add Transaction Screen
   if (currentScreen === 'addTransaction') {
     return (
-      <View style={[
-        styles.walletContainer,
-        selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
-      ]}>
-        {/* Header with back button */}
-        <View style={styles.walletHeader}>
+      <View style={styles.container}>
+        {/* Fixed Top Banner - Same as main screen */}
+        <View style={styles.topBanner}>
+          <View style={styles.addTransactionHeaderLeft}>
+            <Text style={styles.addTransactionIcon}>➕</Text>
+            <Text style={styles.appName}>Add Transaction</Text>
+            <TouchableOpacity 
+              style={[
+                styles.addTransactionSaveButton,
+                (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.addTransactionSaveButtonDisabled
+              ]}
+              onPress={saveTransaction}
+              disabled={isLoading || !amount || amount === '0' || !selectedAccount || !selectedCategory}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text style={[
+                  styles.addTransactionSaveText,
+                  (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.addTransactionSaveTextDisabled
+                ]}>✓</Text>
+              )}
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity 
-            style={styles.walletBackButton}
-            onPress={() => setCurrentScreen('home')}
+            style={styles.settingsButton}
+            onPress={() => setCurrentScreen('transactions')}
           >
-            <Text style={styles.walletBackText}>✕</Text>
-          </TouchableOpacity>
-          <Text style={styles.walletTitle}>Add Transaction</Text>
-          <TouchableOpacity 
-            style={[
-              styles.walletSaveButton,
-              (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.walletSaveButtonDisabled
-            ]}
-            onPress={saveTransaction}
-            disabled={isLoading || !amount || amount === '0' || !selectedAccount || !selectedCategory}
-          >
-            {isLoading ? (
-              <ActivityIndicator size="small" color="white" />
-            ) : (
-              <Text style={[
-                styles.walletSaveText,
-                (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.walletSaveTextDisabled
-              ]}>✓</Text>
-            )}
+            <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Transaction Type Banner */}
+        {/* Content Area with Dynamic Background */}
         <View style={[
-          styles.transactionTypeBanner,
-          selectedCategoryData?.is_income ? styles.incomeBanner : styles.expenseBanner
+          styles.addTransactionContent,
+          selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
         ]}>
-          <Text style={styles.transactionTypeBannerText}>
-            {selectedCategoryData?.is_income ? 'INCOME' : 'EXPENSE'}
-          </Text>
-        </View>
-
-        {/* Amount Display */}
-        <View style={styles.amountSection}>
-          <Text style={[styles.signSymbol, selectedCategoryData?.is_income ? styles.positiveSign : styles.negativeSign]}>
-            {selectedCategoryData?.is_income ? '+' : '-'}
-          </Text>
-          <Text style={styles.currencySymbol}>
-            {selectedAccountData?.currency === 'eur' ? '€' : 
-             selectedAccountData?.currency === 'mad' ? 'MAD' : 
-             selectedAccountData?.currency === 'usd' ? '$' : '$'}
-          </Text>
-          <Text style={styles.amountText}>{amount}</Text>
-          <TouchableOpacity 
-            style={styles.detailsButton}
-            onPress={() => setCurrentScreen('transactionDetails')}
-          >
-            <Text style={styles.detailsButtonText}>→</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Account and Category Cards */}
-        <View style={styles.cardSection}>
-          <TouchableOpacity 
-            style={[
-              styles.card,
-              !selectedAccount && styles.cardRequired
-            ]}
-            onPress={() => setCurrentScreen('selectAccount')}
-          >
-            <Text style={styles.cardLabel}>Account *</Text>
-            <Text style={[
-              styles.cardValue,
-              !selectedAccount && styles.cardValueRequired
-            ]}>
-              {selectedAccountData ? 
-                `${selectedAccountData.display_name || selectedAccountData.name}` : 
-                'Select account'
-              }
+          {/* Transaction Type Banner */}
+          <View style={[
+            styles.transactionTypeBanner,
+            selectedCategoryData?.is_income ? styles.incomeBanner : styles.expenseBanner
+          ]}>
+            <Text style={styles.transactionTypeBannerText}>
+              {selectedCategoryData?.is_income ? 'INCOME' : 'EXPENSE'}
             </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[
-              styles.card,
-              !selectedCategory && styles.cardRequired
-            ]}
-            onPress={() => setCurrentScreen('selectCategory')}
-          >
-            <Text style={styles.cardLabel}>Category *</Text>
-            <Text style={[
-              styles.cardValue,
-              !selectedCategory && styles.cardValueRequired
-            ]}>
-              {selectedCategoryData ? selectedCategoryData.name : 'Select category'}
-            </Text>
-          </TouchableOpacity>
-        </View>
+          </View>
 
-        {/* Numeric Keypad */}
-        <View style={styles.keypad}>
-          <View style={styles.keypadRow}>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('1')}>
-              <Text style={styles.keypadButtonText}>1</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('2')}>
-              <Text style={styles.keypadButtonText}>2</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('3')}>
-              <Text style={styles.keypadButtonText}>3</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.keypadRow}>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('4')}>
-              <Text style={styles.keypadButtonText}>4</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('5')}>
-              <Text style={styles.keypadButtonText}>5</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('6')}>
-              <Text style={styles.keypadButtonText}>6</Text>
+          {/* Amount Display */}
+          <View style={styles.amountSection}>
+            <Text style={[styles.signSymbol, selectedCategoryData?.is_income ? styles.positiveSign : styles.negativeSign]}>
+              {selectedCategoryData?.is_income ? '+' : '-'}
+            </Text>
+            <Text style={styles.currencySymbol}>
+              {selectedAccountData?.currency === 'eur' ? '€' : 
+               selectedAccountData?.currency === 'mad' ? 'MAD' : 
+               selectedAccountData?.currency === 'usd' ? '$' : '$'}
+            </Text>
+            <Text style={styles.amountText}>{amount}</Text>
+            <TouchableOpacity 
+              style={styles.detailsButton}
+              onPress={() => setCurrentScreen('transactionDetails')}
+            >
+              <Text style={styles.detailsButtonText}>→</Text>
             </TouchableOpacity>
           </View>
-          
-          <View style={styles.keypadRow}>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('7')}>
-              <Text style={styles.keypadButtonText}>7</Text>
+
+          {/* Account and Category Cards */}
+          <View style={styles.cardSection}>
+            <TouchableOpacity 
+              style={[
+                styles.card,
+                !selectedAccount && styles.cardRequired
+              ]}
+              onPress={() => setCurrentScreen('selectAccount')}
+            >
+              <Text style={[
+                styles.cardValue,
+                !selectedAccount && styles.cardValueRequired,
+                { textAlign: 'center' }
+              ]}>
+                {selectedAccountData ? 
+                  `${selectedAccountData.display_name || selectedAccountData.name}` : 
+                  '👛 Pick account'
+                }
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('8')}>
-              <Text style={styles.keypadButtonText}>8</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('9')}>
-              <Text style={styles.keypadButtonText}>9</Text>
+            
+            <TouchableOpacity 
+              style={[
+                styles.card,
+                !selectedCategory && styles.cardRequired
+              ]}
+              onPress={() => setCurrentScreen('selectCategory')}
+            >
+              <Text style={[
+                styles.cardValue,
+                !selectedCategory && styles.cardValueRequired,
+                { textAlign: 'center' }
+              ]}>
+                {selectedCategoryData ? selectedCategoryData.name : '🔀 Pick category'}
+              </Text>
             </TouchableOpacity>
           </View>
-          
-          <View style={styles.keypadRow}>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('.')}>
-              <Text style={styles.keypadButtonText}>.</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('0')}>
-              <Text style={styles.keypadButtonText}>0</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.keypadButton} onPress={handleKeypadBackspace}>
-              <Text style={styles.keypadButtonText}>⌫</Text>
-            </TouchableOpacity>
+
+          {/* Numeric Keypad */}
+          <View style={styles.keypad}>
+            <View style={styles.keypadRow}>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('1')}>
+                <Text style={styles.keypadButtonText}>1</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('2')}>
+                <Text style={styles.keypadButtonText}>2</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('3')}>
+                <Text style={styles.keypadButtonText}>3</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.keypadRow}>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('4')}>
+                <Text style={styles.keypadButtonText}>4</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('5')}>
+                <Text style={styles.keypadButtonText}>5</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('6')}>
+                <Text style={styles.keypadButtonText}>6</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.keypadRow}>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('7')}>
+                <Text style={styles.keypadButtonText}>7</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('8')}>
+                <Text style={styles.keypadButtonText}>8</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('9')}>
+                <Text style={styles.keypadButtonText}>9</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.keypadRow}>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('.')}>
+                <Text style={styles.keypadButtonText}>.</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={() => handleKeypadInput('0')}>
+                <Text style={styles.keypadButtonText}>0</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.keypadButton} onPress={handleKeypadBackspace}>
+                <Text style={styles.keypadButtonText}>⌫</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>
@@ -1903,12 +1989,17 @@ export default function App() {
   if (currentScreen === 'settings') {
     return (
       <View style={styles.container}>
-        <View style={styles.walletHeader}>
-          <TouchableOpacity
-            style={styles.walletBackButton}
-            onPress={() => setCurrentScreen('home')}
+        {/* Fixed Top Banner - Same as main screen */}
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>⚙️</Text>
+            <Text style={styles.appName}>Settings</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => setCurrentScreen('transactions')}
           >
-            <Text style={styles.walletBackText}>← Back</Text>
+            <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
         </View>
         
@@ -1918,6 +2009,8 @@ export default function App() {
             loadSavedToken();
             fetchAccounts();
             fetchCategories();
+            // Redirect to transactions screen
+            setCurrentScreen('transactions');
           }}
           accounts={accounts}
         />
@@ -1927,37 +2020,39 @@ export default function App() {
 
   // Home Screen
   return (
-    <View style={styles.container}>
-      <Text style={styles.text}>Flash Track Money</Text>
-      <Text style={styles.subtitle}>Ready to track expenses!</Text>
-      
-      <TouchableOpacity 
-        style={styles.button} 
-        onPress={() => setCurrentScreen('addTransaction')}
-      >
-        <Text style={styles.buttonText}>Add Transaction</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={styles.button} 
-        onPress={() => setCurrentScreen('transactions')}
-      >
-        <Text style={styles.buttonText}>View Transactions</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity 
-        style={[styles.button, styles.secondaryButton]}
-        onPress={() => setCurrentScreen('settings')}
-      >
-        <Text style={[styles.buttonText, styles.secondaryButtonText]}>Settings</Text>
-      </TouchableOpacity>
-      
-      {token && (
-        <Text style={styles.tokenStatus}>
-          API Token configured ✓
-        </Text>
-      )}
-    </View>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <View style={styles.container}>
+        <Text style={styles.text}>Flash Track Money</Text>
+        <Text style={styles.subtitle}>Ready to track expenses!</Text>
+        
+        <TouchableOpacity 
+          style={styles.button} 
+          onPress={() => setCurrentScreen('addTransaction')}
+        >
+          <Text style={styles.buttonText}>Add Transaction</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.button} 
+          onPress={() => setCurrentScreen('transactions')}
+        >
+          <Text style={styles.buttonText}>View Transactions</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.button, styles.secondaryButton]}
+          onPress={() => setCurrentScreen('settings')}
+        >
+          <Text style={[styles.buttonText, styles.secondaryButtonText]}>Settings</Text>
+        </TouchableOpacity>
+        
+        {token && (
+          <Text style={styles.tokenStatus}>
+            API Token configured ✓
+          </Text>
+        )}
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -1965,7 +2060,152 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  
+  // Top Banner Styles
+  topBanner: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 50,
+    paddingBottom: 15,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 3,
+    zIndex: 1000,
+  },
+  appName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  settingsButton: {
+    padding: 8,
+  },
+  
+  // Placeholder Styles
+  placeholderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
+  },
+  placeholderContent: {
+    alignItems: 'center',
+    maxWidth: 300,
+  },
+  placeholderIcon: {
+    fontSize: 64,
+    marginBottom: 20,
+  },
+  placeholderTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  placeholderDescription: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 30,
+  },
+  placeholderButtons: {
+    width: '100%',
+    gap: 12,
+  },
+  placeholderPrimaryButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  placeholderPrimaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  placeholderSecondaryButton: {
+    backgroundColor: 'transparent',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+  },
+  placeholderSecondaryButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Section Title
+  sectionTitleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginVertical: 15,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  tokenWarning: {
+    backgroundColor: '#FFE5E5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  tokenWarningText: {
+    fontSize: 12,
+    color: '#FF3B30',
+    fontWeight: '500',
+  },
+  
+  // Transactions List Styles
+  mainTransactionsList: {
+    flex: 1,
+  },
+  transactionsListContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 100, // Space for FAB
+  },
+  
+  // Floating Action Button
+  fab: {
+    position: 'absolute',
+    bottom: 80, // Moved higher to avoid OS navigation
+    right: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fabIcon: {
+    fontSize: 24,
+    color: '#fff',
+    fontWeight: 'bold',
   },
   text: {
     fontSize: 20,
@@ -2307,35 +2547,36 @@ const styles = StyleSheet.create({
   },
   cardValue: {
     color: '#333',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '500',
   },
   keypad: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 8, // Reduced from 12
+    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20, // Added bottom padding to ensure visibility
-    flex: 1,
+    paddingBottom: 40, // Add space above OS navigation
   },
   keypadRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 6, // Reduced from 8
+    marginBottom: 12,
   },
   keypadButton: {
     flex: 1,
-    aspectRatio: 1,
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
+    height: 60, // Fixed height instead of aspect ratio
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginHorizontal: 6,
+    marginHorizontal: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   keypadButtonText: {
-    fontSize: 24,
-    fontWeight: '500',
+    fontSize: 28,
+    fontWeight: '600',
     color: '#333',
   },
   
@@ -2472,15 +2713,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'white',
   },
-  categorySearchButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
+  searchBanner: {
+    flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'white',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
   },
-  categorySearchText: {
-    fontSize: 20,
-    color: 'white',
+  searchIcon: {
+    fontSize: 18,
+    marginRight: 10,
+    color: '#666',
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 4,
   },
   categoryContent: {
     flex: 1,
@@ -2696,10 +2947,11 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
   },
   detailsLabel: {
-    fontSize: 14,
-    color: '#8E8E93',
+    fontSize: 16,
+    color: '#333',
     marginBottom: 10,
     textTransform: 'uppercase',
+    fontWeight: '600',
   },
   detailsInput: {
     fontSize: 16,
@@ -3121,6 +3373,81 @@ const styles = StyleSheet.create({
   removeAttachmentText: {
     color: 'white',
     fontSize: 12,
+    fontWeight: 'bold',
+  },
+
+  // Settings Screen Header Styles
+  settingsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsIcon: {
+    fontSize: 24,
+    marginRight: 8,
+  },
+  closeIcon: {
+    fontSize: 20,
+    color: '#333',
+  },
+  
+  // Add Transaction Header Styles
+  addTransactionHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  addTransactionIcon: {
+    fontSize: 24,
+    marginRight: 8,
+  },
+  addTransactionSaveButton: {
+    width: 32,
+    height: 32,
+    backgroundColor: '#2D7D7A',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 12,
+  },
+  addTransactionSaveButtonDisabled: {
+    backgroundColor: '#A0A0A0',
+  },
+  addTransactionSaveText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  addTransactionSaveTextDisabled: {
+    color: '#E0E0E0',
+  },
+  
+  // Add Transaction Content Area
+  addTransactionContent: {
+    flex: 1,
+  },
+
+  // Currency Picker Styles
+  currencyPickerContent: {
+    maxHeight: 300,
+  },
+  currencyPickerItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E0E0E0',
+  },
+  currencyPickerItemSelected: {
+    backgroundColor: '#F0F8FF',
+  },
+  currencyPickerText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  currencyPickerCheck: {
+    fontSize: 16,
+    color: '#007AFF',
     fontWeight: 'bold',
   },
 });
