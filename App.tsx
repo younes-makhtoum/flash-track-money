@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import SettingsScreen from './src/screens/SettingsScreen';
+import { SecureStorage } from './src/utils/storage';
 
 // Lunch Money API configuration
 const LUNCH_MONEY_API_URL = 'https://dev.lunchmoney.app/v1';
@@ -323,11 +325,14 @@ export default function App() {
           return isPhysicalCash && isActive;
         });
         
-        console.log('� Filtered physical cash accounts:', physicalCashAccounts);
+        console.log('🏦 Filtered physical cash accounts:', physicalCashAccounts);
         setAccounts(physicalCashAccounts);
         
         if (physicalCashAccounts.length === 0) {
           console.log('⚠️ No physical cash accounts found after filtering');
+        } else {
+          // Auto-select preferred account after accounts are loaded
+          setTimeout(() => autoSelectPreferredAccount(), 100);
         }
       } else {
         console.log('❌ No assets property in response');
@@ -596,6 +601,40 @@ export default function App() {
     }
   };
 
+  // Auto-select account based on currency preference
+  const autoSelectPreferredAccount = async () => {
+    try {
+      const preferredCurrency = await SecureStorage.getCurrencyPreference();
+      if (preferredCurrency && accounts.length > 0) {
+        // Find the first account with the preferred currency
+        const preferredAccount = accounts.find(account => 
+          account.currency?.toLowerCase() === preferredCurrency.toLowerCase()
+        );
+        
+        if (preferredAccount) {
+          console.log('🎯 Auto-selecting preferred account:', preferredAccount.name, preferredCurrency);
+          setSelectedAccount(preferredAccount.id.toString());
+          setSelectedAccountData(preferredAccount);
+          return;
+        }
+      }
+      
+      // Fallback: select first account if no preference or no matching account
+      if (accounts.length > 0) {
+        console.log('📍 Fallback: selecting first available account');
+        setSelectedAccount(accounts[0].id.toString());
+        setSelectedAccountData(accounts[0]);
+      }
+    } catch (error) {
+      console.error('Error auto-selecting account:', error);
+      // Fallback to first account on error
+      if (accounts.length > 0) {
+        setSelectedAccount(accounts[0].id.toString());
+        setSelectedAccountData(accounts[0]);
+      }
+    }
+  };
+
   // Reset transaction form
   const resetTransactionForm = () => {
     setAmount('0');
@@ -611,6 +650,9 @@ export default function App() {
     setCategorySearchQuery('');
     setTagSearchQuery('');
     setTransactionType('expense'); // Reset to default
+    
+    // Auto-select preferred account after reset
+    autoSelectPreferredAccount();
   };
 
   const fetchTransactions = async () => {
@@ -1745,47 +1787,22 @@ export default function App() {
   if (currentScreen === 'settings') {
     return (
       <View style={styles.container}>
-        <Text style={styles.text}>Settings</Text>
-        <Text style={styles.subtitle}>Enter your Lunch Money API Token</Text>
+        <View style={styles.walletHeader}>
+          <TouchableOpacity
+            style={styles.walletBackButton}
+            onPress={() => setCurrentScreen('home')}
+          >
+            <Text style={styles.walletBackText}>← Back</Text>
+          </TouchableOpacity>
+        </View>
         
-        <TextInput
-          style={styles.input}
-          placeholder="Paste your API token here"
-          value={token}
-          onChangeText={setToken}
-          secureTextEntry
-          editable={!isLoading}
+        <SettingsScreen
+          onTokenSaved={() => {
+            // Refresh token and accounts when a new token is saved
+            handleSaveToken();
+          }}
+          accounts={accounts}
         />
-        
-        {error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-        
-        <TouchableOpacity 
-          style={[styles.button, isLoading && styles.buttonDisabled]} 
-          onPress={handleSaveToken}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <Text style={styles.buttonText}>Save Token</Text>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.button, styles.secondaryButton]} 
-          onPress={() => setCurrentScreen('home')}
-          disabled={isLoading}
-        >
-          <Text style={[styles.buttonText, styles.secondaryButtonText]}>Back</Text>
-        </TouchableOpacity>
-        
-        <Text style={styles.debugText}>
-          Debug: Using {LUNCH_MONEY_API_URL}
-        </Text>
       </View>
     );
   }

@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const STORAGE_KEYS = {
   LM_API_TOKEN: '@lunch_money_api_token',
   USER_SETTINGS: '@user_settings',
+  CURRENCY_PREFERENCE: '@currency_preference',
 } as const;
 
 /**
@@ -91,6 +92,30 @@ export class SecureStorage {
       return settings ? JSON.parse(settings) : null;
     } catch (error) {
       console.error('Error retrieving user settings:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Store user's preferred currency
+   */
+  static async setCurrencyPreference(currency: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.CURRENCY_PREFERENCE, currency);
+    } catch (error) {
+      console.error('Error storing currency preference:', error);
+      throw new Error('Failed to store currency preference');
+    }
+  }
+
+  /**
+   * Retrieve user's preferred currency
+   */
+  static async getCurrencyPreference(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(STORAGE_KEYS.CURRENCY_PREFERENCE);
+    } catch (error) {
+      console.error('Error retrieving currency preference:', error);
       return null;
     }
   }
