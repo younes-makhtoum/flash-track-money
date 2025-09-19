@@ -57,6 +57,10 @@ export default function App() {
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   
+  // Category section expanded state
+  const [expensesExpanded, setExpensesExpanded] = useState(true);
+  const [incomesExpanded, setIncomesExpanded] = useState(false);
+  
   // Tag-related state
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [tagSearchQuery, setTagSearchQuery] = useState('');
@@ -431,18 +435,6 @@ export default function App() {
     // Validate category selection
     if (!selectedCategory || !selectedCategoryData) {
       errors.push('Please select a category');
-    } else {
-      // Validate income/expense category mismatch
-      const categoryIsIncome = selectedCategoryData.is_income;
-      const transactionIsIncome = transactionType === 'income';
-      
-      if (categoryIsIncome !== transactionIsIncome) {
-        if (categoryIsIncome && !transactionIsIncome) {
-          errors.push('This is an income category but transaction type is set to expense');
-        } else if (!categoryIsIncome && transactionIsIncome) {
-          errors.push('This is an expense category but transaction type is set to income');
-        }
-      }
     }
     
     // Validate payee (if required by user preference)
@@ -467,49 +459,6 @@ export default function App() {
     };
   };
 
-  // Function to handle transaction type switching with validation
-  const handleTransactionTypeChange = (newType: 'expense' | 'income') => {
-    // If no category is selected, allow switching freely
-    if (!selectedCategory || !selectedCategoryData) {
-      setTransactionType(newType);
-      return;
-    }
-
-    // Check if the selected category matches the new transaction type
-    const categoryIsIncome = selectedCategoryData.is_income;
-    const newTypeIsIncome = newType === 'income';
-
-    if (categoryIsIncome !== newTypeIsIncome) {
-      // Show warning and ask user to choose
-      const categoryTypeText = categoryIsIncome ? 'income' : 'expense';
-      const oppositeTypeText = newTypeIsIncome ? 'income' : 'expense';
-      
-      Alert.alert(
-        'Category Mismatch',
-        `The selected category "${selectedCategoryData.name}" is an ${categoryTypeText} category, but you're trying to switch to ${oppositeTypeText}.\n\nWould you like to clear the category selection and switch transaction type?`,
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel'
-          },
-          {
-            text: 'Clear Category & Switch',
-            onPress: () => {
-              // Clear category selection and switch type
-              setSelectedCategory(null);
-              setSelectedCategoryData(null);
-              setSelectedCategoryGroup(null);
-              setTransactionType(newType);
-            }
-          }
-        ]
-      );
-    } else {
-      // No mismatch, allow switching
-      setTransactionType(newType);
-    }
-  };
-
   // Save transaction function
   const saveTransaction = async () => {
     const validation = validateTransaction();
@@ -532,15 +481,22 @@ export default function App() {
     
     try {
       // Prepare transaction data for Lunch Money API
+      const isIncomeTransaction = selectedCategoryData?.is_income || false;
+      const transactionAmount = parseFloat(amount);
+      
       const transactionData: any = {
         date: transactionDate.toISOString().split('T')[0], // YYYY-MM-DD format (required)
-        amount: parseFloat(amount), // Numeric value (required)
+        amount: transactionAmount, // Always positive amount - let category determine income/expense
         payee: transactionPayee.trim() || undefined,
         notes: transactionNote.trim() || undefined,
         category_id: parseInt(selectedCategory!),
         status: 'cleared', // Set status to cleared as requested
         tags: transactionTags.length > 0 ? transactionTags.map((tag: any) => typeof tag === 'object' ? tag.id : tag) : undefined,
       };
+
+      console.log('🔍 Transaction type:', isIncomeTransaction ? 'INCOME' : 'EXPENSE');
+      console.log('🔍 Transaction amount:', transactionAmount);
+      console.log('🔍 Category is_income:', selectedCategoryData?.is_income);
 
       // Add account information - either asset_id OR plaid_account_id, not both
       const accountInfo = accounts.find(acc => acc.id.toString() === selectedAccount);
@@ -579,7 +535,7 @@ export default function App() {
         apply_rules: false,
         skip_duplicates: false,
         check_for_recurring: false,
-        debit_as_negative: false,
+        debit_as_negative: false, // We send positive amounts, let category determine type
         skip_balance_update: true
       };
       
@@ -654,6 +610,7 @@ export default function App() {
     setTransactionDate(new Date());
     setCategorySearchQuery('');
     setTagSearchQuery('');
+    setTransactionType('expense'); // Reset to default
   };
 
   const fetchTransactions = async () => {
@@ -1053,51 +1010,72 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.categoryContent}>
-          {/* Most Frequent Section - Commented out for now
-          <View style={styles.categorySection}>
-            <Text style={styles.categorySectionTitle}>MOST FREQUENT</Text>
-            <View style={styles.mostFrequentGrid}>
-              {mostFrequentCategories.map((category, index) => (
-                <TouchableOpacity
-                  key={category.id}
-                  style={styles.mostFrequentItem}
-                  onPress={() => {
-                    setSelectedCategoryGroup(category);
-                    setCurrentScreen('selectSubcategory');
-                  }}
-                >
-                  <View style={[styles.mostFrequentIcon, { backgroundColor: category.color || '#4A90E2' }]}>
-                    <Text style={styles.mostFrequentIconText}>
-                      {category.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <Text style={styles.mostFrequentName}>{category.name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          {/* Expense Categories Section */}
+          <View style={[styles.categorySection, styles.expenseCategorySection]}>
+            <TouchableOpacity 
+              style={styles.collapsibleHeader}
+              onPress={() => setExpensesExpanded(!expensesExpanded)}
+            >
+              <Text style={styles.categorySectionTitle}>EXPENSES</Text>
+              <Text style={styles.expandIcon}>{expensesExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {expensesExpanded && (
+              <View>
+                {categoryGroups
+                  .filter(cat => !cat.is_income) // Expense categories
+                  .map((category) => (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={styles.categoryItem}
+                      onPress={() => {
+                        setSelectedCategoryGroup(category);
+                        setCurrentScreen('selectSubcategory');
+                      }}
+                    >
+                      <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
+                        <Text style={styles.categoryIconText}>
+                          {category.name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.categoryName}>{category.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            )}
           </View>
-          */}
 
-          {/* Main Categories Section */}
-          <View style={styles.categorySection}>
-            <Text style={styles.categorySectionTitle}>MAIN CATEGORIES</Text>
-            {categoryGroups.map((category) => (
-              <TouchableOpacity
-                key={category.id}
-                style={styles.categoryItem}
-                onPress={() => {
-                  setSelectedCategoryGroup(category);
-                  setCurrentScreen('selectSubcategory');
-                }}
-              >
-                <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
-                  <Text style={styles.categoryIconText}>
-                    {category.name.charAt(0).toUpperCase()}
-                  </Text>
-                </View>
-                <Text style={styles.categoryName}>{category.name}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Income Categories Section */}
+          <View style={[styles.categorySection, styles.incomeCategorySection]}>
+            <TouchableOpacity 
+              style={styles.collapsibleHeader}
+              onPress={() => setIncomesExpanded(!incomesExpanded)}
+            >
+              <Text style={styles.categorySectionTitle}>INCOMES</Text>
+              <Text style={styles.expandIcon}>{incomesExpanded ? '▼' : '▶'}</Text>
+            </TouchableOpacity>
+            {incomesExpanded && (
+              <View>
+                {categoryGroups
+                  .filter(cat => cat.is_income) // Income categories
+                  .map((category) => (
+                    <TouchableOpacity
+                      key={category.id}
+                      style={styles.categoryItem}
+                      onPress={() => {
+                        setSelectedCategoryGroup(category);
+                        setCurrentScreen('selectSubcategory');
+                      }}
+                    >
+                      <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
+                        <Text style={styles.categoryIconText}>
+                          {category.name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.categoryName}>{category.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+              </View>
+            )}
           </View>
         </ScrollView>
       </View>
@@ -1612,7 +1590,7 @@ export default function App() {
     return (
       <View style={[
         styles.walletContainer,
-        transactionType === 'expense' ? styles.expenseBackground : styles.incomeBackground
+        selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
       ]}>
         {/* Header with back button */}
         <View style={styles.walletHeader}>
@@ -1642,31 +1620,20 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* Transaction Type Tabs */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, transactionType === 'expense' && styles.activeTab]}
-            onPress={() => handleTransactionTypeChange('expense')}
-          >
-            <Text style={[styles.tabText, transactionType === 'expense' && styles.activeTabText]}>
-              EXPENSE
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={[styles.tab, transactionType === 'income' && styles.activeTab]}
-            onPress={() => handleTransactionTypeChange('income')}
-          >
-            <Text style={[styles.tabText, transactionType === 'income' && styles.activeTabText]}>
-              INCOME
-            </Text>
-          </TouchableOpacity>
+        {/* Transaction Type Banner */}
+        <View style={[
+          styles.transactionTypeBanner,
+          selectedCategoryData?.is_income ? styles.incomeBanner : styles.expenseBanner
+        ]}>
+          <Text style={styles.transactionTypeBannerText}>
+            {selectedCategoryData?.is_income ? 'INCOME' : 'EXPENSE'}
+          </Text>
         </View>
 
         {/* Amount Display */}
         <View style={styles.amountSection}>
-          <Text style={[styles.signSymbol, transactionType === 'expense' ? styles.negativeSign : styles.positiveSign]}>
-            {transactionType === 'expense' ? '-' : '+'}
+          <Text style={[styles.signSymbol, selectedCategoryData?.is_income ? styles.positiveSign : styles.negativeSign]}>
+            {selectedCategoryData?.is_income ? '+' : '-'}
           </Text>
           <Text style={styles.currencySymbol}>
             {selectedAccountData?.currency === 'eur' ? '€' : 
@@ -2139,6 +2106,26 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#333',
   },
+  transactionTypeBanner: {
+    marginHorizontal: 20,
+    marginTop: 5,
+    marginBottom: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  expenseBanner: {
+    backgroundColor: '#FFF5F5', // Light red background
+  },
+  incomeBanner: {
+    backgroundColor: '#F0FFF4', // Light green background
+  },
+  transactionTypeBannerText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    textTransform: 'uppercase',
+  },
   amountSection: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2374,6 +2361,31 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     backgroundColor: '#F0F0F0',
     textTransform: 'uppercase',
+  },
+  expenseCategorySection: {
+    backgroundColor: '#FFF5F5', // Light red background
+    marginBottom: 10,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  incomeCategorySection: {
+    backgroundColor: '#F0FFF4', // Light green background
+    marginBottom: 10,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  collapsibleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  expandIcon: {
+    fontSize: 16,
+    color: '#8E8E93',
+    fontWeight: 'bold',
   },
   mostFrequentGrid: {
     flexDirection: 'row',
