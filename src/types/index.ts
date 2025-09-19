@@ -60,6 +60,15 @@ export interface Receipt {
   createdAt: string;
 }
 
+export interface Attachment {
+  id: string;
+  uri: string;
+  fileName: string;
+  dateAdded: string;
+  size?: number;
+  transactionId?: string;
+}
+
 export interface NewTransaction {
   amount: string;
   payee: string;

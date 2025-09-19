@@ -95,7 +95,6 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
     try {
       setSelectedCurrency(currency);
       await SecureStorage.setCurrencyPreference(currency);
-      console.log('Currency preference saved:', currency);
     } catch (error) {
       console.error('Error saving currency preference:', error);
       Alert.alert('Error', 'Failed to save currency preference');

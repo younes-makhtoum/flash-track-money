@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera to capture receipt photos for expense tracking.",
+        "NSPhotoLibraryUsageDescription": "This app accesses the photo library to attach receipt images to transactions."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +26,12 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.flashtrackmoney"
+      "package": "com.anonymous.flashtrackmoney",
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"

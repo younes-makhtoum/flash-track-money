@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import SettingsScreen from './src/screens/SettingsScreen';
+import AttachmentModal from './src/components/AttachmentModal';
+import ReceiptGallery from './src/components/ReceiptGallery';
 import { SecureStorage } from './src/utils/storage';
 
 // Lunch Money API configuration
@@ -78,6 +80,15 @@ export default function App() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
+  // Attachment-related state
+  const [showAttachmentModal, setShowAttachmentModal] = useState(false);
+  const [transactionAttachments, setTransactionAttachments] = useState<any[]>([]);
+  const [currentTransactionId, setCurrentTransactionId] = useState<string | null>(null);
+  
+  // Receipt gallery state
+  const [showReceiptGallery, setShowReceiptGallery] = useState(false);
+  const [galleryInitialIndex, setGalleryInitialIndex] = useState(0);
+
   // Helper functions for date formatting
   const formatDateForDisplay = (date: Date) => {
     const day = date.getDate();
@@ -96,6 +107,56 @@ export default function App() {
 
   const formatDateToISO8601 = (date: Date) => {
     return date.toISOString();
+  };
+
+  // Attachment handling functions
+  const handleAttachmentAdded = (attachment: any) => {
+    setTransactionAttachments(prev => [...prev, attachment]);
+    setHasReceipt(true);
+  };
+
+  const removeAttachment = async (attachmentId: string) => {
+    if (currentTransactionId) {
+      try {
+        await SecureStorage.removeTransactionAttachment(currentTransactionId, attachmentId);
+      } catch (error) {
+        Alert.alert('Error', 'Failed to remove attachment');
+        return;
+      }
+    }
+    setTransactionAttachments(prev => prev.filter(att => att.id !== attachmentId));
+    
+    // Update hasReceipt based on remaining attachments
+    setHasReceipt(transactionAttachments.length > 1);
+  };
+
+  const openReceiptGallery = (index: number) => {
+    setGalleryInitialIndex(index);
+    setShowReceiptGallery(true);
+  };
+
+  const handleDeleteFromGallery = async (attachmentId: string) => {
+    await removeAttachment(attachmentId);
+    
+    // Close gallery if no more attachments
+    if (transactionAttachments.length <= 1) {
+      setShowReceiptGallery(false);
+    }
+  };
+
+  const linkAttachmentsToTransaction = async (transactionId: string) => {
+    // Update any temporary attachments with the real transaction ID
+    for (const attachment of transactionAttachments) {
+      if (attachment.transactionId === 'temp') {
+        const updatedAttachment = { ...attachment, transactionId };
+        try {
+          await SecureStorage.addTransactionAttachment(updatedAttachment);
+        } catch (error) {
+          console.error('Failed to link attachment to transaction:', error);
+        }
+      }
+    }
+    setCurrentTransactionId(transactionId);
   };
 
   // Keypad functions
@@ -183,7 +244,7 @@ export default function App() {
 
   const loadSavedToken = async () => {
     try {
-      const savedToken = await AsyncStorage.getItem('lunchMoneyToken');
+      const savedToken = await SecureStorage.getLunchMoneyToken();
       if (savedToken) {
         setToken(savedToken);
       }
@@ -499,14 +560,8 @@ export default function App() {
         tags: transactionTags.length > 0 ? transactionTags.map((tag: any) => typeof tag === 'object' ? tag.id : tag) : undefined,
       };
 
-      console.log('🔍 Transaction type:', isIncomeTransaction ? 'INCOME' : 'EXPENSE');
-      console.log('🔍 Transaction amount:', transactionAmount);
-      console.log('🔍 Category is_income:', selectedCategoryData?.is_income);
-
       // Add account information - either asset_id OR plaid_account_id, not both
       const accountInfo = accounts.find(acc => acc.id.toString() === selectedAccount);
-      console.log('🔍 Account info for transaction:', accountInfo);
-      console.log('🔍 Selected account ID:', selectedAccount);
       
       if (accountInfo) {
         // Add currency from account
@@ -572,6 +627,12 @@ export default function App() {
       if (!result.ids || !Array.isArray(result.ids) || result.ids.length === 0) {
         throw new Error('Transaction was not created - no IDs returned');
       }
+
+      // Link attachments to the created transaction
+      const createdTransactionId = result.ids[0].toString();
+      if (transactionAttachments.length > 0) {
+        await linkAttachmentsToTransaction(createdTransactionId);
+      }
       
       // Show success message
       Alert.alert(
@@ -612,7 +673,6 @@ export default function App() {
         );
         
         if (preferredAccount) {
-          console.log('🎯 Auto-selecting preferred account:', preferredAccount.name, preferredCurrency);
           setSelectedAccount(preferredAccount.id.toString());
           setSelectedAccountData(preferredAccount);
           return;
@@ -621,7 +681,6 @@ export default function App() {
       
       // Fallback: select first account if no preference or no matching account
       if (accounts.length > 0) {
-        console.log('📍 Fallback: selecting first available account');
         setSelectedAccount(accounts[0].id.toString());
         setSelectedAccountData(accounts[0]);
       }
@@ -650,6 +709,11 @@ export default function App() {
     setCategorySearchQuery('');
     setTagSearchQuery('');
     setTransactionType('expense'); // Reset to default
+    
+    // Reset attachment state
+    setTransactionAttachments([]);
+    setHasReceipt(false);
+    setCurrentTransactionId(null);
     
     // Auto-select preferred account after reset
     autoSelectPreferredAccount();
@@ -786,7 +850,7 @@ export default function App() {
         await callLunchMoneyAPI('/me', token.trim());
         
         // Save token if valid
-        await AsyncStorage.setItem('lunchMoneyToken', token.trim());
+        await SecureStorage.setLunchMoneyToken(token.trim());
         Alert.alert('Success!', 'Token saved successfully');
         setCurrentScreen('home');
       } catch (error) {
@@ -1515,14 +1579,49 @@ export default function App() {
 
           {/* Receipt Section */}
           <View style={styles.detailsSection}>
-              <Text style={styles.detailsLabel}>Attachments</Text>
-              <TouchableOpacity 
-                style={styles.addReceiptButton}
-                onPress={() => setHasReceipt(!hasReceipt)}
-              >
-                <Text style={styles.addReceiptText}>ADD RECEIPT</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.detailsLabel}>Attachments</Text>
+            
+            {/* Display existing attachments */}
+            {transactionAttachments.length > 0 && (
+              <View style={styles.attachmentsList}>
+                {transactionAttachments.map((attachment, index) => (
+                  <View key={attachment.id} style={styles.attachmentItem}>
+                    <TouchableOpacity 
+                      onPress={() => openReceiptGallery(index)}
+                      style={styles.thumbnailContainer}
+                    >
+                      <Image source={{ uri: attachment.uri }} style={styles.attachmentThumbnail} />
+                      <View style={styles.thumbnailOverlay}>
+                        <Text style={styles.thumbnailIcon}>👁️</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <View style={styles.attachmentInfo}>
+                      <Text style={styles.attachmentName} numberOfLines={1}>
+                        Receipt {index + 1}
+                      </Text>
+                      <Text style={styles.attachmentSize}>
+                        {attachment.size ? `${Math.round(attachment.size / 1024)}KB` : 'Image file'}
+                      </Text>
+                      <Text style={styles.attachmentHint}>Tap to view</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.removeAttachmentButton}
+                      onPress={() => removeAttachment(attachment.id)}
+                    >
+                      <Text style={styles.removeAttachmentText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+            
+            <TouchableOpacity 
+              style={styles.addReceiptButton}
+              onPress={() => setShowAttachmentModal(true)}
+            >
+              <Text style={styles.addReceiptText}>ADD RECEIPT</Text>
+            </TouchableOpacity>
+          </View>
           </ScrollView>
         </View>
 
@@ -1623,6 +1722,23 @@ export default function App() {
             />
           )
         )}
+
+        {/* Attachment Modal */}
+        <AttachmentModal
+          visible={showAttachmentModal}
+          onClose={() => setShowAttachmentModal(false)}
+          onAttachmentAdded={handleAttachmentAdded}
+          transactionId={currentTransactionId || undefined}
+        />
+
+        {/* Receipt Gallery */}
+        <ReceiptGallery
+          visible={showReceiptGallery}
+          attachments={transactionAttachments}
+          initialIndex={galleryInitialIndex}
+          onClose={() => setShowReceiptGallery(false)}
+          onDeleteAttachment={handleDeleteFromGallery}
+        />
       </>
     );
   }
@@ -1799,7 +1915,9 @@ export default function App() {
         <SettingsScreen
           onTokenSaved={() => {
             // Refresh token and accounts when a new token is saved
-            handleSaveToken();
+            loadSavedToken();
+            fetchAccounts();
+            fetchCategories();
           }}
           accounts={accounts}
         />
@@ -2933,5 +3051,76 @@ const styles = StyleSheet.create({
   },
   cardValueRequired: {
     color: '#FF3B30',
+  },
+
+  // Attachment Styles
+  attachmentsList: {
+    marginBottom: 12,
+  },
+  attachmentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  thumbnailContainer: {
+    position: 'relative',
+  },
+  attachmentThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    marginRight: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  thumbnailOverlay: {
+    position: 'absolute',
+    top: 2,
+    right: 12,
+    width: 20,
+    height: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbnailIcon: {
+    fontSize: 10,
+    color: '#fff',
+  },
+  attachmentInfo: {
+    flex: 1,
+  },
+  attachmentName: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 2,
+  },
+  attachmentSize: {
+    fontSize: 12,
+    color: '#666',
+  },
+  attachmentHint: {
+    fontSize: 11,
+    color: '#007AFF',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  removeAttachmentButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FF3B30',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeAttachmentText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
 });
