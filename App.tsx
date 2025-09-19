@@ -413,6 +413,249 @@ export default function App() {
     }
   };
 
+  // Transaction validation function
+  const validateTransaction = () => {
+    const errors: string[] = [];
+    
+    // Validate amount
+    const numericAmount = parseFloat(amount);
+    if (!amount || amount === '0' || isNaN(numericAmount) || numericAmount <= 0) {
+      errors.push('Amount must be greater than 0');
+    }
+    
+    // Validate account selection
+    if (!selectedAccount || !selectedAccountData) {
+      errors.push('Please select an account');
+    }
+    
+    // Validate category selection
+    if (!selectedCategory || !selectedCategoryData) {
+      errors.push('Please select a category');
+    } else {
+      // Validate income/expense category mismatch
+      const categoryIsIncome = selectedCategoryData.is_income;
+      const transactionIsIncome = transactionType === 'income';
+      
+      if (categoryIsIncome !== transactionIsIncome) {
+        if (categoryIsIncome && !transactionIsIncome) {
+          errors.push('This is an income category but transaction type is set to expense');
+        } else if (!categoryIsIncome && transactionIsIncome) {
+          errors.push('This is an expense category but transaction type is set to income');
+        }
+      }
+    }
+    
+    // Validate payee (if required by user preference)
+    if (!transactionPayee.trim()) {
+      // Note: Payee is optional, but you can uncomment this if you want to make it required
+      // errors.push('Please enter a payee');
+    }
+    
+    // Validate date
+    if (!transactionDate || isNaN(transactionDate.getTime())) {
+      errors.push('Please select a valid date');
+    }
+    
+    // Check if date is not in the future (optional validation)
+    if (transactionDate > new Date()) {
+      errors.push('Transaction date cannot be in the future');
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    };
+  };
+
+  // Function to handle transaction type switching with validation
+  const handleTransactionTypeChange = (newType: 'expense' | 'income') => {
+    // If no category is selected, allow switching freely
+    if (!selectedCategory || !selectedCategoryData) {
+      setTransactionType(newType);
+      return;
+    }
+
+    // Check if the selected category matches the new transaction type
+    const categoryIsIncome = selectedCategoryData.is_income;
+    const newTypeIsIncome = newType === 'income';
+
+    if (categoryIsIncome !== newTypeIsIncome) {
+      // Show warning and ask user to choose
+      const categoryTypeText = categoryIsIncome ? 'income' : 'expense';
+      const oppositeTypeText = newTypeIsIncome ? 'income' : 'expense';
+      
+      Alert.alert(
+        'Category Mismatch',
+        `The selected category "${selectedCategoryData.name}" is an ${categoryTypeText} category, but you're trying to switch to ${oppositeTypeText}.\n\nWould you like to clear the category selection and switch transaction type?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: 'Clear Category & Switch',
+            onPress: () => {
+              // Clear category selection and switch type
+              setSelectedCategory(null);
+              setSelectedCategoryData(null);
+              setSelectedCategoryGroup(null);
+              setTransactionType(newType);
+            }
+          }
+        ]
+      );
+    } else {
+      // No mismatch, allow switching
+      setTransactionType(newType);
+    }
+  };
+
+  // Save transaction function
+  const saveTransaction = async () => {
+    const validation = validateTransaction();
+    
+    if (!validation.isValid) {
+      Alert.alert(
+        'Validation Error',
+        validation.errors.join('\n'),
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    if (!token) {
+      Alert.alert('Error', 'No API token found. Please set up your token in settings.');
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      // Prepare transaction data for Lunch Money API
+      const transactionData: any = {
+        date: transactionDate.toISOString().split('T')[0], // YYYY-MM-DD format (required)
+        amount: parseFloat(amount), // Numeric value (required)
+        payee: transactionPayee.trim() || undefined,
+        notes: transactionNote.trim() || undefined,
+        category_id: parseInt(selectedCategory!),
+        status: 'cleared', // Set status to cleared as requested
+        tags: transactionTags.length > 0 ? transactionTags.map((tag: any) => typeof tag === 'object' ? tag.id : tag) : undefined,
+      };
+
+      // Add account information - either asset_id OR plaid_account_id, not both
+      const accountInfo = accounts.find(acc => acc.id.toString() === selectedAccount);
+      console.log('🔍 Account info for transaction:', accountInfo);
+      console.log('🔍 Selected account ID:', selectedAccount);
+      
+      if (accountInfo) {
+        // Add currency from account
+        if (accountInfo.currency) {
+          transactionData.currency = accountInfo.currency;
+          console.log('💰 Setting currency from account:', accountInfo.currency);
+        }
+        
+        // Add account ID - prefer asset_id over plaid_account_id
+        if (accountInfo.id) {
+          transactionData.asset_id = accountInfo.id;
+          console.log('🏦 Setting asset_id:', accountInfo.id);
+        } else if (accountInfo.plaid_account_id) {
+          transactionData.plaid_account_id = accountInfo.plaid_account_id;
+          console.log('🏦 Setting plaid_account_id:', accountInfo.plaid_account_id);
+        }
+      } else {
+        console.log('⚠️ Warning: No account info found for selected account:', selectedAccount);
+      }
+
+      // Remove undefined values to keep request clean
+      const cleanTransactionData = Object.fromEntries(
+        Object.entries(transactionData).filter(([_, v]) => v !== undefined)
+      );
+      
+      console.log('💾 Saving transaction:', cleanTransactionData);
+      
+      // Format request body according to API documentation
+      const requestBody = {
+        transactions: [cleanTransactionData], // API expects array of transactions
+        apply_rules: false,
+        skip_duplicates: false,
+        check_for_recurring: false,
+        debit_as_negative: false,
+        skip_balance_update: true
+      };
+      
+      // Call Lunch Money API to create transaction
+      const response = await fetch(`${LUNCH_MONEY_API_URL}/transactions`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.log('❌ API Error Response:', errorData);
+        
+        // Handle API error format according to documentation
+        const errorMessage = errorData.error || 
+                            (errorData.errors && Array.isArray(errorData.errors) ? errorData.errors.join(', ') : 'Unknown error');
+        
+        throw new Error(`Failed to save transaction: ${errorMessage}`);
+      }
+      
+      const result = await response.json();
+      console.log('✅ Transaction saved successfully:', result);
+      
+      // Check if we got transaction IDs back (indicates success)
+      if (!result.ids || !Array.isArray(result.ids) || result.ids.length === 0) {
+        throw new Error('Transaction was not created - no IDs returned');
+      }
+      
+      // Show success message
+      Alert.alert(
+        'Success',
+        'Transaction saved successfully!',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Reset form and navigate back
+              resetTransactionForm();
+              setCurrentScreen('addTransaction');
+            }
+          }
+        ]
+      );
+      
+    } catch (error) {
+      console.log('❌ Error saving transaction:', error);
+      Alert.alert(
+        'Error',
+        `Failed to save transaction: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Reset transaction form
+  const resetTransactionForm = () => {
+    setAmount('0');
+    setSelectedAccount(null);
+    setSelectedCategory(null);
+    setSelectedAccountData(null);
+    setSelectedCategoryData(null);
+    setSelectedCategoryGroup(null);
+    setTransactionNote('');
+    setTransactionPayee('');
+    setTransactionTags([]);
+    setTransactionDate(new Date());
+    setCategorySearchQuery('');
+    setTagSearchQuery('');
+  };
+
   const fetchTransactions = async () => {
     if (!token) return;
 
@@ -835,9 +1078,9 @@ export default function App() {
           </View>
           */}
 
-          {/* All Categories Section */}
+          {/* Main Categories Section */}
           <View style={styles.categorySection}>
-            <Text style={styles.categorySectionTitle}>ALL CATEGORIES</Text>
+            <Text style={styles.categorySectionTitle}>MAIN CATEGORIES</Text>
             {categoryGroups.map((category) => (
               <TouchableOpacity
                 key={category.id}
@@ -890,35 +1133,9 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.categoryContent}>
-          {/* Show the group itself as selectable */}
-          <View style={styles.categorySection}>
-            <Text style={styles.categorySectionTitle}>GENERAL</Text>
-            <TouchableOpacity
-              style={styles.categoryItem}
-              onPress={() => {
-                console.log(`📂 Selected category group: ${selectedCategoryGroup.name}, is_income: ${selectedCategoryGroup.is_income}`);
-                setSelectedCategory(selectedCategoryGroup.id.toString());
-                setSelectedCategoryData(selectedCategoryGroup);
-                // Switch transaction type based on category's is_income property
-                const newTransactionType = selectedCategoryGroup.is_income ? 'income' : 'expense';
-                setTransactionType(newTransactionType);
-                console.log(`💰 Transaction type switched to: ${newTransactionType}`);
-                setCurrentScreen('addTransaction');
-              }}
-            >
-              <View style={[styles.categoryIcon, { backgroundColor: selectedCategoryGroup.color || '#4A90E2' }]}>
-                <Text style={styles.categoryIconText}>
-                  {selectedCategoryGroup.name.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-              <Text style={styles.categoryName}>{selectedCategoryGroup.name}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Subcategories */}
-          {subcategories.length > 0 && (
+          {/* Only show subcategories - no category group selection allowed */}
+          {subcategories.length > 0 ? (
             <View style={styles.categorySection}>
-              <Text style={styles.categorySectionTitle}>SUBCATEGORIES</Text>
               {subcategories.map((category) => (
                 <TouchableOpacity
                   key={category.id}
@@ -947,6 +1164,10 @@ export default function App() {
                   </View>
                 </TouchableOpacity>
               ))}
+            </View>
+          ) : (
+            <View style={styles.categorySection}>
+              <Text style={styles.categorySectionTitle}>No subcategories available</Text>
             </View>
           )}
         </ScrollView>
@@ -1185,12 +1406,7 @@ export default function App() {
                selectedAccountData?.currency === 'mad' ? 'MAD' : 
                selectedAccountData?.currency === 'usd' ? '$' : '$'} {amount}
             </Text>
-            <TouchableOpacity 
-              style={styles.detailsSaveButton}
-              onPress={() => setCurrentScreen('addTransaction')}
-            >
-              <Text style={styles.detailsSaveText}>✓</Text>
-            </TouchableOpacity>
+            <View style={styles.detailsHeaderSpacer} />
           </View>
 
           <ScrollView style={styles.transactionDetailsContent}>
@@ -1407,14 +1623,30 @@ export default function App() {
             <Text style={styles.walletBackText}>✕</Text>
           </TouchableOpacity>
           <Text style={styles.walletTitle}>Add Transaction</Text>
-          <View style={styles.walletBackButton}></View>
+          <TouchableOpacity 
+            style={[
+              styles.walletSaveButton,
+              (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.walletSaveButtonDisabled
+            ]}
+            onPress={saveTransaction}
+            disabled={isLoading || !amount || amount === '0' || !selectedAccount || !selectedCategory}
+          >
+            {isLoading ? (
+              <ActivityIndicator size="small" color="white" />
+            ) : (
+              <Text style={[
+                styles.walletSaveText,
+                (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.walletSaveTextDisabled
+              ]}>✓</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Transaction Type Tabs */}
         <View style={styles.tabContainer}>
           <TouchableOpacity 
             style={[styles.tab, transactionType === 'expense' && styles.activeTab]}
-            onPress={() => setTransactionType('expense')}
+            onPress={() => handleTransactionTypeChange('expense')}
           >
             <Text style={[styles.tabText, transactionType === 'expense' && styles.activeTabText]}>
               EXPENSE
@@ -1423,7 +1655,7 @@ export default function App() {
           
           <TouchableOpacity 
             style={[styles.tab, transactionType === 'income' && styles.activeTab]}
-            onPress={() => setTransactionType('income')}
+            onPress={() => handleTransactionTypeChange('income')}
           >
             <Text style={[styles.tabText, transactionType === 'income' && styles.activeTabText]}>
               INCOME
@@ -1453,11 +1685,17 @@ export default function App() {
         {/* Account and Category Cards */}
         <View style={styles.cardSection}>
           <TouchableOpacity 
-            style={styles.card}
+            style={[
+              styles.card,
+              !selectedAccount && styles.cardRequired
+            ]}
             onPress={() => setCurrentScreen('selectAccount')}
           >
-            <Text style={styles.cardLabel}>Account</Text>
-            <Text style={styles.cardValue}>
+            <Text style={styles.cardLabel}>Account *</Text>
+            <Text style={[
+              styles.cardValue,
+              !selectedAccount && styles.cardValueRequired
+            ]}>
               {selectedAccountData ? 
                 `${selectedAccountData.display_name || selectedAccountData.name}` : 
                 'Select account'
@@ -1466,11 +1704,17 @@ export default function App() {
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={styles.card}
+            style={[
+              styles.card,
+              !selectedCategory && styles.cardRequired
+            ]}
             onPress={() => setCurrentScreen('selectCategory')}
           >
-            <Text style={styles.cardLabel}>Category</Text>
-            <Text style={styles.cardValue}>
+            <Text style={styles.cardLabel}>Category *</Text>
+            <Text style={[
+              styles.cardValue,
+              !selectedCategory && styles.cardValueRequired
+            ]}>
               {selectedCategoryData ? selectedCategoryData.name : 'Select category'}
             </Text>
           </TouchableOpacity>
@@ -1849,6 +2093,25 @@ const styles = StyleSheet.create({
     color: '#333',
     fontSize: 18,
     fontWeight: '600',
+  },
+  walletSaveButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#2D7D7A',
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  walletSaveButtonDisabled: {
+    backgroundColor: '#A0A0A0',
+  },
+  walletSaveText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  walletSaveTextDisabled: {
+    color: '#E0E0E0',
   },
   tabContainer: {
     flexDirection: 'row',
@@ -2259,13 +2522,21 @@ const styles = StyleSheet.create({
   detailsSaveButton: {
     width: 40,
     height: 40,
+    backgroundColor: '#2D7D7A',
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  detailsSaveButtonDisabled: {
+    backgroundColor: '#A0A0A0',
   },
   detailsSaveText: {
     fontSize: 24,
     color: 'white',
     fontWeight: 'bold',
+  },
+  detailsHeaderSpacer: {
+    width: 40,
   },
   transactionDetailsContent: {
     flex: 1,
@@ -2624,5 +2895,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#8E8E93',
     textAlign: 'center',
+  },
+  
+  // Validation Styles
+  cardRequired: {
+    borderColor: '#FF3B30',
+    borderWidth: 2,
+  },
+  cardValueRequired: {
+    color: '#FF3B30',
   },
 });
