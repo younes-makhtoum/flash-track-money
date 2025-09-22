@@ -249,11 +249,6 @@ export default function App() {
       if (savedToken) {
         setToken(savedToken);
       }
-      // Also load currency preference
-      const savedCurrency = await SecureStorage.getCurrencyPreference();
-      if (savedCurrency) {
-        setSelectedCurrency(savedCurrency);
-      }
     } catch (error) {
       console.error('Error loading token:', error);
     }

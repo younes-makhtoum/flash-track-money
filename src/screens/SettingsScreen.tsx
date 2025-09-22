@@ -26,18 +26,10 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
   const [apiToken, setApiToken] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasExistingToken, setHasExistingToken] = useState(false);
-  const [selectedCurrency, setSelectedCurrency] = useState<string | null>(null);
-  const [availableCurrencies, setAvailableCurrencies] = useState<string[]>([]);
 
   useEffect(() => {
     checkExistingToken();
-    loadCurrencyPreference();
-    updateAvailableCurrencies(); // Always initialize currencies
   }, []);
-
-  useEffect(() => {
-    updateAvailableCurrencies(); // Update when accounts change
-  }, [accounts]);
 
   const checkExistingToken = async () => {
     try {
@@ -50,55 +42,6 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
       }
     } catch (error) {
       console.error('Error checking existing token:', error);
-    }
-  };
-
-  const loadCurrencyPreference = async () => {
-    try {
-      const savedCurrency = await SecureStorage.getCurrencyPreference();
-      if (savedCurrency) {
-        setSelectedCurrency(savedCurrency);
-      }
-    } catch (error) {
-      console.error('Error loading currency preference:', error);
-    }
-  };
-
-  const updateAvailableCurrencies = () => {
-    // Only show currencies from actual API accounts
-    if (accounts && accounts.length > 0) {
-      const accountCurrencies = [...new Set(accounts.map(account => account.currency.toLowerCase()))];
-      setAvailableCurrencies(accountCurrencies);
-    } else {
-      // Clear currencies when no accounts are available
-      setAvailableCurrencies([]);
-    }
-  };
-
-  const getCurrencyDisplayName = (currency: string): string => {
-    const currencySymbols: { [key: string]: string } = {
-      'usd': '$',
-      'eur': '€',
-      'gbp': '£',
-      'jpy': '¥',
-      'cad': '$',
-      'aud': '$',
-      'chf': 'CHF',
-      'mad': 'DH',
-      // Add more currencies as needed
-    };
-    
-    const symbol = currencySymbols[currency.toLowerCase()] || currency.toUpperCase();
-    return `${symbol} (${currency.toUpperCase()}) zone`;
-  };
-
-  const handleCurrencySelection = async (currency: string) => {
-    try {
-      setSelectedCurrency(currency);
-      await SecureStorage.setCurrencyPreference(currency);
-    } catch (error) {
-      console.error('Error saving currency preference:', error);
-      Alert.alert('Error', 'Failed to save currency preference');
     }
   };
 
@@ -168,33 +111,6 @@ export default function SettingsScreen({ onTokenSaved, accounts = [] }: Settings
   return (
     <ScrollView style={styles.container}>
       <View style={styles.content}>
-        {/* Currency Location Section - Only visible when token exists AND accounts are available */}
-        {hasExistingToken && accounts && accounts.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Currency Location</Text>
-            <Text style={styles.description}>
-              Select your primary currency zone from your available accounts. This will automatically pre-select the corresponding account when creating new transactions.
-            </Text>
-            
-            <View style={styles.currencyOptions}>
-              {availableCurrencies.map((currency) => (
-                <TouchableOpacity
-                  key={currency}
-                  style={styles.radioOption}
-                  onPress={() => handleCurrencySelection(currency)}
-                >
-                  <View style={styles.radioButton}>
-                    {selectedCurrency === currency && <View style={styles.radioSelected} />}
-                  </View>
-                  <Text style={styles.radioLabel}>
-                    {getCurrencyDisplayName(currency)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        )}
-        
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>API Token</Text>
           
@@ -320,34 +236,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     lineHeight: 20,
-  },
-  currencyOptions: {
-    gap: 12,
-  },
-  radioOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  radioButton: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#007AFF',
-    marginRight: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioSelected: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#007AFF',
-  },
-  radioLabel: {
-    fontSize: 16,
-    color: '#333',
-    flex: 1,
   },
 });
