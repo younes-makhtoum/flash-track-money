@@ -871,6 +871,64 @@ export default function App() {
     }
   };
 
+  // Helper function to format dates in a user-friendly way
+  const formatTransactionDate = (dateString: string): string => {
+    const date = new Date(dateString);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    // Check if it's today
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    }
+    
+    // Check if it's yesterday
+    if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    }
+    
+    // Format as "Sept. 22, 2025"
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }).replace(',', '.');
+  };
+
+  // Helper function to format amounts with spaces for thousands and comma for decimals
+  const formatAmount = (amount: number): string => {
+    // Convert to absolute value
+    const absoluteAmount = Math.abs(amount);
+    
+    // Check if the number has meaningful decimals
+    const hasDecimals = absoluteAmount % 1 !== 0;
+    
+    let formattedNumber: string;
+    if (hasDecimals) {
+      // Show 2 decimal places if there are decimals
+      formattedNumber = absoluteAmount.toFixed(2);
+    } else {
+      // Show whole number if no decimals
+      formattedNumber = absoluteAmount.toString();
+    }
+    
+    // Split into integer and decimal parts
+    const parts = formattedNumber.split('.');
+    const integerPart = parts[0];
+    const decimalPart = parts[1];
+    
+    // Add spaces every 3 digits for thousands separator
+    const formattedInteger = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    
+    // Return with comma as decimal separator if decimals exist
+    if (decimalPart) {
+      return `${formattedInteger},${decimalPart}`;
+    } else {
+      return formattedInteger;
+    }
+  };
+
   const renderTransaction = ({ item }: { item: any }) => {
     // Simple currency display - just use the currency code from API
     const currency = item.currency?.toUpperCase() || 'USD';
@@ -882,19 +940,30 @@ export default function App() {
 
       return (
         <View style={styles.transactionCard}>
+          {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
-            <Text style={styles.payee}>{item.payee}</Text>
             <Text style={[styles.amount, styles.transfer]}>
-              {currency} {displayAmount.toFixed(2)}
+              {currency} {formatAmount(displayAmount)}
             </Text>
+            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
           </View>
-          <View style={styles.transactionDetails}>
-            <Text style={styles.category}>Transfer</Text>
-            <Text style={styles.date}>{item.date}</Text>
-          </View>
-          <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
+          
+          {/* Second line: Payee */}
+          <Text style={styles.payee}>{item.payee}</Text>
+          
+          {/* Third line: Notes (if available) */}
           {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
-          <Text style={styles.transferIndicator}>↔️ Transfer</Text>
+          
+          {/* Bottom line: Icons (left) and Account (right) */}
+          <View style={styles.bottomLine}>
+            <View style={styles.leftIcons}>
+              {(item.has_attachment || item.attachments?.length > 0) && (
+                <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
+              )}
+              <Text style={styles.receiptIcon}>↔️</Text>
+            </View>
+            <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
+          </View>
         </View>
       );
     }
@@ -906,29 +975,32 @@ export default function App() {
 
       return (
         <View style={styles.transactionCard}>
+          {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
-            <Text style={styles.payee}>{item.payee}</Text>
             <Text style={[styles.amount, styles.grouped]}>
-              {currency} {displayAmount.toFixed(2)}
+              {currency} {formatAmount(displayAmount)}
+            </Text>
+            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+          </View>
+          
+          {/* Second line: Payee */}
+          <Text style={styles.payee}>{item.payee}</Text>
+          
+          {/* Third line: Notes (if available) */}
+          {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
+          
+          {/* Bottom line: Icons (left) and Account (right) */}
+          <View style={styles.bottomLine}>
+            <View style={styles.leftIcons}>
+              {(item.has_attachment || item.attachments?.length > 0) && (
+                <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
+              )}
+              <Text style={styles.receiptIcon}>📋</Text>
+            </View>
+            <Text style={styles.account}>
+              {item.account_display_name || 'Unknown Account'}
             </Text>
           </View>
-          <View style={styles.transactionDetails}>
-            <Text style={styles.category}>{item.category_name || 'Grouped Transaction'}</Text>
-            <View style={styles.groupDates}>
-              {item.group_dates && item.group_dates.length > 1 && (
-                <>
-                  <Text style={styles.date}>Payment: {item.group_dates[0]}</Text>
-                  <Text style={styles.date}>Refund: {item.group_dates[item.group_dates.length - 1]}</Text>
-                </>
-              )}
-              {(!item.group_dates || item.group_dates.length <= 1) && (
-                <Text style={styles.date}>{item.date}</Text>
-              )}
-            </View>
-          </View>
-          <Text style={styles.account}>{item.account_display_name || 'Unknown Account'}</Text>
-          {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
-          <Text style={styles.groupIndicator}>📋 Grouped ({item.group_children?.length || 0} items)</Text>
         </View>
       );
     }
@@ -947,21 +1019,34 @@ export default function App() {
 
     return (
       <View style={styles.transactionCard}>
+        {/* First line: Amount (left) and Date (right) */}
         <View style={styles.transactionHeader}>
-          <Text style={styles.payee}>{displayPayee}</Text>
           <Text style={[styles.amount, isIncome ? styles.income : styles.expense]}>
-            {!isIncome ? '-' : ''}{currency} {displayAmount.toFixed(2)}
+            {!isIncome ? '-' : ''}{currency} {formatAmount(displayAmount)}
+          </Text>
+          <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+        </View>
+        
+        {/* Second line: Payee */}
+        <Text style={styles.payee}>{displayPayee}</Text>
+        
+        {/* Third line: Notes (if available) */}
+        {displayNotes && <Text style={styles.notes}>{displayNotes}</Text>}
+        
+        {/* Bottom line: Icons (left) and Account (right) */}
+        <View style={styles.bottomLine}>
+          <View style={styles.leftIcons}>
+            {(item.has_attachment || item.attachments?.length > 0) && (
+              <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
+            )}
+            {isRecurring && (
+              <Text style={styles.receiptIcon}>🔄</Text>
+            )}
+          </View>
+          <Text style={styles.account}>
+            {item.account_display_name || item.asset_display_name || item.plaid_account_display_name || item.account || 'Unknown Account'}
           </Text>
         </View>
-        <View style={styles.transactionDetails}>
-          <Text style={styles.category}>{item.category_name || item.category || 'Uncategorized'}</Text>
-          <Text style={styles.date}>{item.date}</Text>
-        </View>
-        <Text style={styles.account}>{item.account_display_name || item.asset_display_name || item.plaid_account_display_name || item.account || 'Unknown Account'}</Text>
-        {displayNotes && <Text style={styles.notes}>{displayNotes}</Text>}
-        {isRecurring && (
-          <Text style={styles.recurringIndicator}>🔄 Recurring</Text>
-        )}
       </View>
     );
   };
@@ -2325,10 +2410,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-    flex: 1,
+    marginBottom: 4,
   },
   amount: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
   },
   expense: {
@@ -2347,18 +2432,19 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   date: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#666',
+    fontWeight: '500',
   },
   account: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 4,
+    fontSize: 14,
+    color: '#333',
   },
   notes: {
-    fontSize: 12,
+    fontSize: 15,
     color: '#777',
     fontStyle: 'italic',
+    marginBottom: 4,
   },
   debugText: {
     fontSize: 12,
@@ -3444,5 +3530,31 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#007AFF',
     fontWeight: 'bold',
+  },
+  
+  // Attachment icon styles
+  attachmentContainer: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+  },
+  receiptIcon: {
+    fontSize: 16,
+    color: '#666',
+  },
+  
+  // Bottom line layout
+  bottomLine: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  leftIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconSpacing: {
+    marginRight: 8,
   },
 });
