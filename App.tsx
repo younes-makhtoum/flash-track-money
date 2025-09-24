@@ -61,6 +61,7 @@ export default function App() {
   const [selectedCategoryGroup, setSelectedCategoryGroup] = useState<any>(null);
   const [categorySearchQuery, setCategorySearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [originalTransactionType, setOriginalTransactionType] = useState<'expense' | 'income' | null>(null);
   
   // Category section expanded state
   const [expensesExpanded, setExpensesExpanded] = useState(true);
@@ -78,6 +79,10 @@ export default function App() {
   const [transactionPayee, setTransactionPayee] = useState('');
   const [transactionDate, setTransactionDate] = useState(new Date());
   const [hasReceipt, setHasReceipt] = useState(false);
+  
+  // Edit Transaction state
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<any>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
 
@@ -91,6 +96,11 @@ export default function App() {
   const [galleryInitialIndex, setGalleryInitialIndex] = useState(0);
 
   // Helper functions for date formatting
+  // Helper function to determine if an account can be edited for new transactions
+  const isAccountEditable = (account: any) => {
+    return account.subtype_name === "physical cash";
+  };
+
   const formatDateForDisplay = (date: Date) => {
     const day = date.getDate();
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -377,17 +387,18 @@ export default function App() {
           console.log('🔍 Available fields:', Object.keys(accountsData.assets[0]));
         }
         
-        // Filter for physical cash assets that are active (closed_on is null)
+        // Filter for ONLY physical cash assets that are active (closed_on is null)
         const physicalCashAccounts = accountsData.assets.filter((asset: any) => {
+          const isCash = asset.type_name === "cash";
           const isPhysicalCash = asset.subtype_name === "physical cash";
           const isActive = asset.closed_on === null; // Active accounts have closed_on = null
           
-          console.log(`Account ${asset.name}: subtype_name="${asset.subtype_name}", physical_cash=${isPhysicalCash}, active=${isActive}, closed_on=${asset.closed_on}`);
+          console.log(`Account ${asset.name}: type_name="${asset.type_name}", subtype_name="${asset.subtype_name}", cash=${isCash}, physical_cash=${isPhysicalCash}, active=${isActive}, closed_on=${asset.closed_on}`);
           console.log(`🔍 Full asset object:`, asset);
-          return isPhysicalCash && isActive;
+          return isCash && isPhysicalCash && isActive;
         });
         
-        console.log('🏦 Filtered physical cash accounts:', physicalCashAccounts);
+        console.log('🏦 Filtered physical cash accounts only:', physicalCashAccounts);
         setAccounts(physicalCashAccounts);
         
         if (physicalCashAccounts.length === 0) {
@@ -702,6 +713,7 @@ export default function App() {
     setCategorySearchQuery('');
     setTagSearchQuery('');
     setTransactionType('expense'); // Reset to default
+    setOriginalTransactionType(null); // Reset original transaction type
     
     // Reset attachment state
     setTransactionAttachments([]);
@@ -786,6 +798,8 @@ export default function App() {
         // Log a few sample transactions to understand the transfer structure
         const sampleTransactions = transactionData.transactions.slice(0, 3);
         console.log('📋 Sample transactions structure:', JSON.stringify(sampleTransactions, null, 2));
+        
+
         
         // Check for transfer-related fields
         const transferTransactions = transactionData.transactions.filter((t: any) => 
@@ -929,6 +943,221 @@ export default function App() {
     }
   };
 
+  // Function to populate form fields with transaction data
+  const populateEditForm = (transaction: any) => {
+    console.log('🔄 Populating edit form with transaction:', transaction);
+    console.log('🏦 Available accounts:', accounts.length);
+    
+    // Basic transaction details
+    setAmount(Math.abs(parseFloat(transaction.amount || 0)).toString());
+    setTransactionPayee(transaction.payee || '');
+    setTransactionNote(transaction.notes || '');
+    setTransactionTags(transaction.tags || []);
+    
+    // Set transaction date
+    if (transaction.date) {
+      setTransactionDate(new Date(transaction.date));
+    }
+    
+    // Find and set account
+    if (transaction.account_id || transaction.plaid_account_id || transaction.asset_id) {
+      // Use the most reliable account identifier available
+      const accountId = transaction.account_id || transaction.plaid_account_id || transaction.asset_id;
+      console.log('🏦 Looking for account ID:', accountId, 'from transaction data:', {
+        account_id: transaction.account_id,
+        plaid_account_id: transaction.plaid_account_id,
+        asset_id: transaction.asset_id
+      });
+      
+      setSelectedAccount(accountId.toString());
+      const accountData = accounts.find(acc => acc.id === accountId);
+      if (accountData) {
+        console.log('✅ Found account in physical cash accounts:', accountData.display_name);
+        setSelectedAccountData(accountData);
+      } else {
+        console.log('⚠️ Account not found in physical cash accounts, determining account type');
+        
+        // Determine if this is a physical cash account that wasn't loaded or a different type
+        const isPlaidAccount = !!transaction.plaid_account_id;
+        const isCashAccount = transaction.asset_institution_name === 'Cash' || 
+                             transaction.account_display_name?.includes('Cash') ||
+                             (!transaction.institution_name && !transaction.plaid_account_id);
+        
+        console.log('🔍 Account type analysis:', {
+          isPlaidAccount,
+          isCashAccount,
+          institution_name: transaction.institution_name,
+          asset_institution_name: transaction.asset_institution_name,
+          account_display_name: transaction.account_display_name
+        });
+        
+        // Create display account data with proper editability flags
+        const tempAccountData = {
+          id: accountId,
+          display_name: transaction.account_display_name || 
+                       transaction.plaid_account_display_name || 
+                       transaction.asset_display_name || 
+                       transaction.account || 
+                       'Unknown Account',
+          name: transaction.account_display_name || 
+                transaction.plaid_account_display_name || 
+                transaction.asset_display_name || 
+                transaction.account || 
+                'Unknown Account',
+          currency: transaction.currency || 'usd',
+          type_name: isPlaidAccount ? 'bank' : 'cash',
+          subtype_name: isCashAccount ? 'physical cash' : 'bank_account',
+          closed_on: null,
+          institution_name: transaction.institution_name || null,
+          asset_id: transaction.asset_id || null,
+          asset_display_name: transaction.asset_display_name || null,
+          asset_institution_name: transaction.asset_institution_name || null,
+          asset_name: transaction.asset_name || null,
+          plaid_account_id: transaction.plaid_account_id || null,
+          isTemporary: true,
+          isPlaidAccount: isPlaidAccount,
+          // Physical cash accounts are editable, Plaid accounts are not
+          isEditable: isCashAccount && !isPlaidAccount
+        };
+        console.log('🔧 Temp account data for display:', tempAccountData);
+        setSelectedAccountData(tempAccountData);
+      }
+    }
+    
+    // Find and set category
+    if (transaction.category_id) {
+      setSelectedCategory(transaction.category_id.toString());
+      const categoryData = categories.find(cat => cat.id === transaction.category_id);
+      if (categoryData) {
+        setSelectedCategoryData(categoryData);
+      }
+    }
+    
+    // Set transaction type based on category or amount
+    // Use the same logic as transaction list display for consistency
+    let originalType: 'expense' | 'income';
+    const amount = parseFloat(transaction.amount || 0);
+    
+    // Check if transaction is categorized (has a category_id or category_name)
+    const isCategorized = transaction.category_id || transaction.category_name;
+    
+    if (isCategorized && transaction.is_income !== undefined && transaction.is_income !== null) {
+      // Use the explicit is_income field when available (for categorized transactions)
+      originalType = transaction.is_income ? 'income' : 'expense';
+    } else {
+      // For uncategorized transactions, check if we have plaid_metadata with credit/debit info
+      let plaidMetadata = null;
+      let hasPlaidDebitCredit = false;
+      
+      if (transaction.plaid_metadata) {
+        try {
+          // Parse the JSON string to get the metadata object
+          plaidMetadata = JSON.parse(transaction.plaid_metadata);
+          hasPlaidDebitCredit = plaidMetadata && plaidMetadata.category && 
+            Array.isArray(plaidMetadata.category) && 
+            (plaidMetadata.category.includes('Credit') || plaidMetadata.category.includes('Debit'));
+        } catch (e) {
+          console.warn('Failed to parse plaid_metadata in populateEditForm:', e);
+        }
+      }
+      
+      if (hasPlaidDebitCredit) {
+        // Use Plaid's credit/debit classification
+        // Credit = inflow/income, Debit = outflow/expense
+        originalType = plaidMetadata.category.includes('Credit') ? 'income' : 'expense';
+      } else {
+        // Fallback: For Plaid transactions without metadata, use inverted amount logic
+        // This handles the counter-intuitive Plaid amount system
+        const isPlaidTransaction = transaction.plaid_account_id || transaction.plaid_account_display_name;
+        if (isPlaidTransaction) {
+          // For Plaid: negative amounts should be treated as income, positive as expense
+          originalType = amount < 0 ? 'income' : 'expense';
+        } else {
+          // Standard logic for non-Plaid transactions
+          originalType = amount >= 0 ? 'income' : 'expense';
+        }
+      }
+    }
+    
+    setTransactionType(originalType);
+    // Store the original type for Plaid account restrictions
+    setOriginalTransactionType(originalType);
+  };
+
+  // Function to save transaction changes
+  const saveTransactionChanges = async () => {
+    if (!editingTransaction || !token) {
+      console.error('No transaction to edit or token missing');
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Prepare transaction data for update
+      const updateData = {
+        payee: transactionPayee,
+        notes: transactionNote,
+        date: transactionDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
+        amount: Math.abs(parseFloat(amount)), // Always positive - category determines if income/expense
+        category_id: selectedCategory ? parseInt(selectedCategory) : null,
+        account_id: selectedAccount ? parseInt(selectedAccount) : null,
+        tags: transactionTags,
+      };
+
+      // Make PUT request to update transaction
+      const response = await fetch(`${LUNCH_MONEY_API_URL}/transactions/${editingTransaction.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transaction: updateData }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+      
+      console.log('✅ Transaction updated successfully');
+      
+      // Refresh transactions list
+      await fetchTransactions();
+      
+      // Return to transactions screen and clear form
+      resetTransactionForm();
+      setIsEditMode(false);
+      setEditingTransaction(null);
+      setCurrentScreen('transactions');
+      
+    } catch (error) {
+      console.error('❌ Failed to update transaction:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update transaction');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle transaction press for editing
+  const handleTransactionPress = async (transaction: any) => {
+    console.log('📝 Transaction tapped for editing:', transaction);
+    setEditingTransaction(transaction);
+    setIsEditMode(true);
+    
+    // Load accounts and categories if not already loaded
+    if (accounts.length === 0 && token) {
+      await fetchAccounts();
+    }
+    if (categories.length === 0 && token) {
+      await fetchCategories();
+    }
+    
+    populateEditForm(transaction);
+    setCurrentScreen('editTransaction');
+  };
+
   const renderTransaction = ({ item }: { item: any }) => {
     // Simple currency display - just use the currency code from API
     const currency = item.currency?.toUpperCase() || 'USD';
@@ -939,7 +1168,8 @@ export default function App() {
       const displayAmount = Math.abs(amount);
 
       return (
-        <View style={styles.transactionCard}>
+        <TouchableOpacity onPress={() => handleTransactionPress(item)}>
+          <View style={styles.transactionCard}>
           {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
             <Text style={[styles.amount, styles.transfer]}>
@@ -965,6 +1195,7 @@ export default function App() {
             <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
           </View>
         </View>
+        </TouchableOpacity>
       );
     }
     
@@ -974,7 +1205,8 @@ export default function App() {
       const displayAmount = Math.abs(amount);
 
       return (
-        <View style={styles.transactionCard}>
+        <TouchableOpacity onPress={() => handleTransactionPress(item)}>
+          <View style={styles.transactionCard}>
           {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
             <Text style={[styles.amount, styles.grouped]}>
@@ -1002,15 +1234,64 @@ export default function App() {
             </Text>
           </View>
         </View>
+        </TouchableOpacity>
       );
     }
     
     // Regular transaction rendering
     // Use API's is_income field if available, otherwise fall back to amount logic
     // The API provides is_income based on category properties
-    const isIncome = item.is_income === true;
     const amount = parseFloat(item.amount || 0);
     const displayAmount = Math.abs(amount);
+    
+    // Determine if transaction should display as income (green/positive) or expense (red/negative)
+    let isIncome;
+    
+    // Check if transaction is categorized (has a category_id or category_name)
+    const isCategorized = item.category_id || item.category_name;
+    
+    if (isCategorized && item.is_income !== undefined && item.is_income !== null) {
+      // Use the explicit is_income field when available (for categorized transactions)
+      isIncome = item.is_income === true;
+    } else {
+      // For uncategorized transactions, check if we have plaid_metadata with credit/debit info
+      let plaidMetadata = null;
+      let hasPlaidDebitCredit = false;
+      
+      if (item.plaid_metadata) {
+        try {
+          // Parse the JSON string to get the metadata object
+          plaidMetadata = JSON.parse(item.plaid_metadata);
+          hasPlaidDebitCredit = plaidMetadata && plaidMetadata.category && 
+            Array.isArray(plaidMetadata.category) && 
+            (plaidMetadata.category.includes('Credit') || plaidMetadata.category.includes('Debit'));
+        } catch (e) {
+          console.warn('Failed to parse plaid_metadata:', e);
+        }
+      }
+      
+      if (hasPlaidDebitCredit) {
+        // Use Plaid's credit/debit classification
+        // Credit = inflow/income (should display positive/green)
+        // Debit = outflow/expense (should display negative/red)
+        isIncome = plaidMetadata.category.includes('Credit');
+      } else {
+        // Fallback: For Plaid transactions without metadata, use inverted amount logic
+        // This handles the counter-intuitive Plaid amount system
+        const isPlaidTransaction = item.plaid_account_id || item.plaid_account_display_name;
+        if (isPlaidTransaction) {
+          // For Plaid: negative amounts should display as income, positive as expense
+          isIncome = amount < 0;
+        } else {
+          // Standard logic for non-Plaid transactions
+          isIncome = amount >= 0;
+        }
+      }
+
+
+    }
+    
+
 
     // Check if this is a recurring transaction based on recurring_id field
     const isRecurring = Boolean(item.recurring_id);
@@ -1018,7 +1299,8 @@ export default function App() {
     const displayNotes = item.notes;
 
     return (
-      <View style={styles.transactionCard}>
+      <TouchableOpacity onPress={() => handleTransactionPress(item)}>
+        <View style={styles.transactionCard}>
         {/* First line: Amount (left) and Date (right) */}
         <View style={styles.transactionHeader}>
           <Text style={[styles.amount, isIncome ? styles.income : styles.expense]}>
@@ -1048,6 +1330,7 @@ export default function App() {
           </Text>
         </View>
       </View>
+      </TouchableOpacity>
     );
   };
 
@@ -1128,7 +1411,10 @@ export default function App() {
         {token && (
           <TouchableOpacity 
             style={styles.fab}
-            onPress={() => setCurrentScreen('addTransaction')}
+            onPress={() => {
+              resetTransactionForm();
+              setCurrentScreen('addTransaction');
+            }}
           >
             <Text style={styles.fabIcon}>+</Text>
           </TouchableOpacity>
@@ -1149,7 +1435,7 @@ export default function App() {
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
-            onPress={() => setCurrentScreen('addTransaction')}
+            onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction')}
           >
             <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
@@ -1174,7 +1460,7 @@ export default function App() {
             <>
               <View style={styles.accountCountContainer}>
                 <Text style={styles.accountCountText}>
-                  {accounts.length} account{accounts.length !== 1 ? 's' : ''} available
+                  {accounts.length} physical cash account{accounts.length !== 1 ? 's' : ''} available
                 </Text>
               </View>
               {accounts.map((account) => {
@@ -1200,7 +1486,7 @@ export default function App() {
                         }
                       }
                       
-                      setCurrentScreen('addTransaction');
+                      setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
                     }}
                   >
                     <View style={styles.accountIconContainer}>
@@ -1244,7 +1530,7 @@ export default function App() {
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
-            onPress={() => setCurrentScreen('addTransaction')}
+            onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction')}
           >
             <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
@@ -1387,13 +1673,59 @@ export default function App() {
                   style={styles.categoryItem}
                   onPress={() => {
                     console.log(`📂 Selected subcategory: ${category.name}, is_income: ${category.is_income}`);
+                    
+                    // Check if this is a Plaid account with a type conflict
+                    if (selectedAccountData?.isPlaidAccount && isEditMode && editingTransaction) {
+                      const newTransactionType = category.is_income ? 'income' : 'expense';
+                      
+                      // Determine original transaction type from Plaid metadata if available
+                      let originalPlaidType = null;
+                      if (editingTransaction.plaid_metadata) {
+                        try {
+                          const plaidMetadata = JSON.parse(editingTransaction.plaid_metadata);
+                          let hasPlaidDebitCredit = false;
+                          
+                          if (plaidMetadata.category && Array.isArray(plaidMetadata.category)) {
+                            hasPlaidDebitCredit = plaidMetadata.category.includes('Credit') || plaidMetadata.category.includes('Debit');
+                            
+                            if (hasPlaidDebitCredit) {
+                              originalPlaidType = plaidMetadata.category.includes('Credit') ? 'income' : 'expense';
+                            }
+                          }
+                          
+                          // Fallback: If no Credit/Debit classification, use amount-based logic
+                          if (!hasPlaidDebitCredit) {
+                            const amount = parseFloat(editingTransaction.amount) || 0;
+                            // For Plaid: negative amounts = income, positive = expense
+                            originalPlaidType = amount < 0 ? 'income' : 'expense';
+
+                          }
+                        } catch (e) {
+                          console.warn('Failed to parse plaid_metadata for conflict check:', e);
+                        }
+                      }
+                      
+                      // For Plaid transactions, ALWAYS use the immutable Plaid metadata type
+                      // Don't use originalTransactionType as it can change when user modifies categories
+                      const originalType = originalPlaidType;
+                      
+                      if (originalType && newTransactionType !== originalType) {
+                        Alert.alert(
+                          'Category Type Conflict',
+                          `This is a bank account transaction synced from your bank as ${originalType === 'income' ? 'an income' : 'an expense'}. You cannot assign ${newTransactionType === 'income' ? 'an income' : 'an expense'} category to it.`,
+                          [{ text: 'OK' }]
+                        );
+                        return;
+                      }
+                    }
+                    
                     setSelectedCategory(category.id.toString());
                     setSelectedCategoryData(category);
                     // Switch transaction type based on category's is_income property
                     const newTransactionType = category.is_income ? 'income' : 'expense';
                     setTransactionType(newTransactionType);
                     console.log(`💰 Transaction type switched to: ${newTransactionType}`);
-                    setCurrentScreen('addTransaction');
+                    setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
                   }}
                 >
                   <View style={[styles.categoryIcon, { backgroundColor: category.color || selectedCategoryGroup.color || '#4A90E2' }]}>
@@ -1473,13 +1805,61 @@ export default function App() {
                 style={styles.categoryItem}
                 onPress={() => {
                   console.log(`📂 Selected category: ${category.name}, is_income: ${category.is_income}`);
+                  
+                  // Check if this is a Plaid account with a type conflict
+                  if (selectedAccountData?.isPlaidAccount && isEditMode && editingTransaction) {
+                    const newTransactionType = category.is_income ? 'income' : 'expense';
+                    
+                    // Determine original transaction type from Plaid metadata if available
+                    let originalPlaidType = null;
+                    if (editingTransaction.plaid_metadata) {
+                      try {
+                        const plaidMetadata = JSON.parse(editingTransaction.plaid_metadata);
+                        let hasPlaidDebitCredit = false;
+                        
+                        if (plaidMetadata.category && Array.isArray(plaidMetadata.category)) {
+                          hasPlaidDebitCredit = plaidMetadata.category.includes('Credit') || plaidMetadata.category.includes('Debit');
+                          
+                          if (hasPlaidDebitCredit) {
+                            originalPlaidType = plaidMetadata.category.includes('Credit') ? 'income' : 'expense';
+                          }
+                        }
+                        
+                        // Fallback: If no Credit/Debit classification, use amount-based logic
+                        if (!hasPlaidDebitCredit) {
+                          const amount = parseFloat(editingTransaction.amount) || 0;
+                          // For Plaid: negative amounts = income, positive = expense
+                          originalPlaidType = amount < 0 ? 'income' : 'expense';
+
+                        }
+                      } catch (e) {
+                        console.warn('Failed to parse plaid_metadata for conflict check:', e);
+                      }
+                    }
+                    
+                    // For Plaid transactions, ALWAYS use the immutable Plaid metadata type
+                    // Don't use originalTransactionType as it can change when user modifies categories
+                    const originalType = originalPlaidType;
+                    
+
+                    
+                    if (originalType && newTransactionType !== originalType) {
+                      Alert.alert(
+                        'Category Type Conflict',
+                        `This is a bank account transaction synced from your bank as ${originalType === 'income' ? 'an income' : 'an expense'}. You cannot assign ${newTransactionType === 'income' ? 'an income' : 'an expense'} category to it.`,
+                        [{ text: 'OK' }]
+                      );
+                      return;
+                    }
+                  }
+                  
                   setSelectedCategory(category.id.toString());
                   setSelectedCategoryData(category);
                   // Switch transaction type based on category's is_income property
                   const newTransactionType = category.is_income ? 'income' : 'expense';
                   setTransactionType(newTransactionType);
                   console.log(`💰 Transaction type switched to: ${newTransactionType}`);
-                  setCurrentScreen('addTransaction');
+                  setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
                   setCategorySearchQuery('');
                   setIsSearching(false);
                 }}
@@ -1516,7 +1896,7 @@ export default function App() {
         <View style={styles.categorySelectionHeader}>
           <TouchableOpacity 
             style={styles.categoryBackButton}
-            onPress={() => setCurrentScreen('transactionDetails')}
+            onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'transactionDetails')}
           >
             <Text style={styles.categoryBackText}>←</Text>
           </TouchableOpacity>
@@ -1648,7 +2028,10 @@ export default function App() {
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
-            onPress={() => setCurrentScreen('addTransaction')}
+            onPress={() => {
+              resetTransactionForm();
+              setCurrentScreen('addTransaction');
+            }}
           >
             <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
@@ -1687,9 +2070,19 @@ export default function App() {
                 <Text style={styles.detailsLabel}>DATE</Text>
                 <TouchableOpacity 
                   style={styles.detailsDateButton}
-                  onPress={() => setShowDatePicker(true)}
+                  onPress={() => {
+                    if (selectedAccountData?.isPlaidAccount) {
+                      Alert.alert(
+                        'Date Not Editable',
+                        'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                        [{ text: 'OK' }]
+                      );
+                    } else {
+                      setShowDatePicker(true);
+                    }
+                  }}
                 >
-                  <Text style={styles.detailsDateText}>
+                  <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
                     {formatDateForDisplay(transactionDate)}
                   </Text>
                   <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -1699,9 +2092,19 @@ export default function App() {
                 <Text style={styles.detailsLabel}>TIME</Text>
                 <TouchableOpacity 
                   style={styles.detailsDateButton}
-                  onPress={() => setShowTimePicker(true)}
+                  onPress={() => {
+                    if (selectedAccountData?.isPlaidAccount) {
+                      Alert.alert(
+                        'Time Not Editable',
+                        'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                        [{ text: 'OK' }]
+                      );
+                    } else {
+                      setShowTimePicker(true);
+                    }
+                  }}
                 >
-                  <Text style={styles.detailsDateText}>
+                  <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
                     {formatTimeForDisplay(transactionDate)}
                   </Text>
                   <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -1868,6 +2271,375 @@ export default function App() {
             </View>
           </Modal>
         ) : (
+          showTimePicker && (
+            <DateTimePicker
+              value={transactionDate}
+              mode="time"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowTimePicker(false);
+                if (selectedDate) {
+                  setTransactionDate(selectedDate);
+                }
+              }}
+            />
+          )
+        )}
+
+        {/* Attachment Modal */}
+        <AttachmentModal
+          visible={showAttachmentModal}
+          onClose={() => setShowAttachmentModal(false)}
+          onAttachmentAdded={handleAttachmentAdded}
+          transactionId={currentTransactionId || undefined}
+        />
+
+        {/* Receipt Gallery */}
+        <ReceiptGallery
+          visible={showReceiptGallery}
+          attachments={transactionAttachments}
+          initialIndex={galleryInitialIndex}
+          onClose={() => setShowReceiptGallery(false)}
+          onDeleteAttachment={handleDeleteFromGallery}
+        />
+      </View>
+    );
+  }
+
+  // Edit Transaction Screen
+  if (currentScreen === 'editTransaction') {
+    return (
+      <View style={[
+        styles.transactionDetailsContainer,
+        selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
+      ]}>
+        {/* Header */}
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>✏️</Text>
+            <Text style={styles.appName}>Edit Transaction</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => {
+              resetTransactionForm();
+              setIsEditMode(false);
+              setEditingTransaction(null);
+              setCurrentScreen('transactions');
+            }}
+          >
+            <Text style={styles.closeIcon}>✕</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.transactionDetailsContent}>
+          {/* Date and Time Section - Field 1 */}
+          <View style={styles.detailsRow}>
+            <View style={styles.detailsHalfSection}>
+              <Text style={styles.detailsLabel}>DATE</Text>
+              <TouchableOpacity 
+                style={styles.detailsDateButton}
+                onPress={() => {
+                  if (selectedAccountData?.isPlaidAccount) {
+                    Alert.alert(
+                      'Date Not Editable',
+                      'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                      [{ text: 'OK' }]
+                    );
+                  } else {
+                    setShowDatePicker(true);
+                  }
+                }}
+              >
+                <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
+                  {formatDateForDisplay(transactionDate)}
+                </Text>
+                <Text style={styles.detailsDropdownIcon}>▼</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.detailsHalfSection}>
+              <Text style={styles.detailsLabel}>TIME</Text>
+              <TouchableOpacity 
+                style={styles.detailsDateButton}
+                onPress={() => {
+                  if (selectedAccountData?.isPlaidAccount) {
+                    Alert.alert(
+                      'Time Not Editable',
+                      'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                      [{ text: 'OK' }]
+                    );
+                  } else {
+                    setShowTimePicker(true);
+                  }
+                }}
+              >
+                <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
+                  {formatTimeForDisplay(transactionDate)}
+                </Text>
+                <Text style={styles.detailsDropdownIcon}>▼</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Amount Section - Field 2 (only in edit mode) */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>AMOUNT</Text>
+            <View style={styles.amountInputContainer}>
+              <Text style={[styles.amountSign, transactionType === 'income' ? styles.positiveSign : styles.negativeSign]}>
+                {transactionType === 'income' ? '+' : '-'}
+              </Text>
+              <TextInput
+                style={[
+                  styles.amountInput,
+                  selectedAccountData?.isPlaidAccount && styles.inputDisabled
+                ]}
+                placeholder="0.00"
+                placeholderTextColor="#A0A0A0"
+                value={amount}
+                onChangeText={selectedAccountData?.isPlaidAccount ? undefined : setAmount}
+                keyboardType="numeric"
+                editable={!selectedAccountData?.isPlaidAccount}
+                onFocus={() => {
+                  if (selectedAccountData?.isPlaidAccount) {
+                    Alert.alert(
+                      'Field Not Editable',
+                      'Amount cannot be edited for bank transactions synced from your bank.',
+                      [{ text: 'OK' }]
+                    );
+                  }
+                }}
+              />
+              <Text style={styles.currencyDisplay}>
+                {selectedAccountData?.currency?.toUpperCase() || 'USD'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Account Section - Field 3 (only in edit mode) */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>ACCOUNT</Text>
+            <TouchableOpacity 
+              style={[
+                styles.detailsInput,
+                selectedAccountData?.isEditable === false && styles.detailsInputDisabled
+              ]}
+              onPress={() => {
+                if (selectedAccountData?.isEditable === false) {
+                  // Determine the type of restriction
+                  const isPhysicalCash = selectedAccountData.subtype_name === 'physical cash';
+                  const isPlaidAccount = selectedAccountData.isPlaidAccount;
+                  
+                  let message = '';
+                  if (isPlaidAccount) {
+                    message = 'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.';
+                  } else if (isPhysicalCash) {
+                    message = 'This physical cash account is not available in the current account list. Please check your account settings.';
+                  } else {
+                    message = 'This transaction is from a non-physical cash account and cannot be moved to a different account.';
+                  }
+                  
+                  Alert.alert('Account Not Editable', message, [{ text: 'OK' }]);
+                  return;
+                }
+                setCurrentScreen('selectAccount');
+              }}
+            >
+              <Text style={selectedAccount ? styles.detailsInputText : styles.detailsPlaceholder}>
+                {selectedAccountData ? selectedAccountData.display_name : 'Select Account'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Payee Section - Field 4 */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>PAYEE</Text>
+            <TextInput
+              style={styles.detailsInput}
+              placeholder="Enter payee name"
+              placeholderTextColor="#A0A0A0"
+              value={transactionPayee}
+              onChangeText={setTransactionPayee}
+            />
+          </View>
+
+          {/* Notes Section - Field 5 */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>NOTES</Text>
+            <TextInput
+              style={styles.detailsInput}
+              placeholder="Description"
+              placeholderTextColor="#A0A0A0"
+              value={transactionNote}
+              onChangeText={setTransactionNote}
+              multiline={true}
+              numberOfLines={3}
+            />
+          </View>
+
+          {/* Category Section - Field 6 (only in edit mode) */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>CATEGORY</Text>
+            <TouchableOpacity 
+              style={styles.detailsInput}
+              onPress={() => setCurrentScreen('selectCategory')}
+            >
+              <Text style={selectedCategory ? styles.detailsInputText : styles.detailsPlaceholder}>
+                {selectedCategoryData ? selectedCategoryData.name : 'Select Category'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Tags Section - Field 7 */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>TAGS</Text>
+            {transactionTags.length > 0 ? (
+              <View>
+                <View style={styles.selectedTagsList}>
+                  {transactionTags.map((tag, index) => (
+                    <View key={index} style={styles.selectedTag}>
+                      <Text style={styles.selectedTagText}>{tag}</Text>
+                    </View>
+                  ))}
+                </View>
+                <TouchableOpacity 
+                  style={styles.addTagButton}
+                  onPress={() => setCurrentScreen('selectTags')}
+                >
+                  <Text style={styles.addTagText}>ADD TAG</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.addTagButton}
+                onPress={() => setCurrentScreen('selectTags')}
+              >
+                <Text style={styles.addTagText}>ADD TAG</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Attachments Section - Field 8 */}
+          <View style={styles.detailsSection}>
+            <Text style={styles.detailsLabel}>ATTACHMENTS</Text>
+            
+            {/* Display existing attachments */}
+            {transactionAttachments.length > 0 && (
+              <View style={styles.attachmentsList}>
+                {transactionAttachments.map((attachment, index) => (
+                  <View key={attachment.id} style={styles.attachmentItem}>
+                    <TouchableOpacity 
+                      onPress={() => openReceiptGallery(index)}
+                      style={styles.thumbnailContainer}
+                    >
+                      <Image source={{ uri: attachment.uri }} style={styles.attachmentThumbnail} />
+                      <View style={styles.thumbnailOverlay}>
+                        <Text style={styles.thumbnailIcon}>👁️</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <View style={styles.attachmentInfo}>
+                      <Text style={styles.attachmentName} numberOfLines={1}>
+                        Receipt {index + 1}
+                      </Text>
+                      <Text style={styles.attachmentSize}>
+                        {attachment.size ? `${Math.round(attachment.size / 1024)}KB` : 'Image file'}
+                      </Text>
+                      <Text style={styles.attachmentHint}>Tap to view</Text>
+                    </View>
+                    <TouchableOpacity 
+                      onPress={() => removeAttachment(attachment.id)}
+                      style={styles.removeAttachmentButton}
+                    >
+                      <Text style={styles.removeAttachmentText}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+            
+            {/* Add attachment button */}
+            <TouchableOpacity 
+              style={styles.addReceiptButton}
+              onPress={() => setShowAttachmentModal(true)}
+            >
+              <Text style={styles.receiptIcon}>📎</Text>
+              <Text style={styles.addReceiptText}>ADD ATTACHMENT</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Save Button */}
+          <View style={styles.detailsSection}>
+            <TouchableOpacity 
+              style={[
+                styles.editSaveButton,
+                (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.editSaveButtonDisabled
+              ]}
+              onPress={saveTransactionChanges}
+              disabled={!amount || amount === '0' || !selectedAccount || !selectedCategory}
+            >
+              <Text style={[
+                styles.editSaveButtonText,
+                (!amount || amount === '0' || !selectedAccount || !selectedCategory) && styles.editSaveButtonTextDisabled
+              ]}>
+                SAVE CHANGES
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+
+        {/* Date and Time Pickers */}
+        {Platform.OS === 'ios' ? (
+          <Modal
+            visible={showDatePicker || showTimePicker}
+            transparent={true}
+            animationType="slide"
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.modalContent}>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity onPress={() => {
+                    setShowDatePicker(false);
+                    setShowTimePicker(false);
+                  }}>
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => {
+                    setShowDatePicker(false);
+                    setShowTimePicker(false);
+                  }}>
+                    <Text style={styles.modalDoneText}>Done</Text>
+                  </TouchableOpacity>
+                </View>
+                <DateTimePicker
+                  value={transactionDate}
+                  mode={showDatePicker ? "date" : "time"}
+                  display="spinner"
+                  onChange={(event, selectedDate) => {
+                    if (selectedDate) {
+                      setTransactionDate(selectedDate);
+                    }
+                  }}
+                  style={styles.dateTimePicker}
+                />
+              </View>
+            </View>
+          </Modal>
+        ) : (
+          showDatePicker && (
+            <DateTimePicker
+              value={transactionDate}
+              mode="date"
+              display="default"
+              onChange={(event, selectedDate) => {
+                setShowDatePicker(false);
+                if (selectedDate) {
+                  setTransactionDate(selectedDate);
+                }
+              }}
+            />
+          )
+        )}
+
+        {Platform.OS === 'ios' ? null : (
           showTimePicker && (
             <DateTimePicker
               value={transactionDate}
@@ -2107,7 +2879,10 @@ export default function App() {
         
         <TouchableOpacity 
           style={styles.button} 
-          onPress={() => setCurrentScreen('addTransaction')}
+          onPress={() => {
+            resetTransactionForm();
+            setCurrentScreen('addTransaction');
+          }}
         >
           <Text style={styles.buttonText}>Add Transaction</Text>
         </TouchableOpacity>
@@ -2740,6 +3515,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
+  accountItemDisabled: {
+    opacity: 0.5,
+    backgroundColor: '#F5F5F5',
+  },
+  accountNameDisabled: {
+    color: '#999',
+  },
+  accountTypeDisabled: {
+    color: '#999',
+  },
   noAccountsContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -3039,6 +3824,10 @@ const styles = StyleSheet.create({
     color: '#333',
     paddingVertical: 8,
     minHeight: 40,
+  },
+  detailsInputDisabled: {
+    backgroundColor: '#F5F5F5',
+    opacity: 0.7,
   },
   addTagButton: {
     alignSelf: 'flex-start',
@@ -3556,5 +4345,79 @@ const styles = StyleSheet.create({
   },
   iconSpacing: {
     marginRight: 8,
+  },
+
+  // Edit Transaction Styles
+  editSaveButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  editSaveButtonDisabled: {
+    backgroundColor: '#CCCCCC',
+  },
+  editSaveButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textTransform: 'uppercase',
+  },
+  editSaveButtonTextDisabled: {
+    color: '#666666',
+  },
+  detailsInputText: {
+    color: '#000000',
+    fontSize: 16,
+  },
+  detailsPlaceholder: {
+    color: '#A0A0A0',
+    fontSize: 16,
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#DDD',
+    borderRadius: 8,
+    padding: 12,
+    backgroundColor: '#FFFFFF',
+  },
+  amountSign: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  amountInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#000000',
+    padding: 0,
+  },
+  currencyDisplay: {
+    fontSize: 16,
+    color: '#666666',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    margin: 20,
+    borderRadius: 10,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  inputDisabled: {
+    color: '#9e9e9e',
+    opacity: 0.6,
   },
 });
