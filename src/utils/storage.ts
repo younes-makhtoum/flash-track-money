@@ -14,6 +14,7 @@ const STORAGE_KEYS = {
   LM_API_TOKEN: '@lunch_money_api_token',
   USER_SETTINGS: '@user_settings',
   CURRENCY_PREFERENCE: '@currency_preference',
+  ACCOUNT_PREFERENCE: '@account_preference',
   TRANSACTION_ATTACHMENTS: '@transaction_attachments',
 } as const;
 
@@ -127,6 +128,30 @@ export class SecureStorage {
       return await AsyncStorage.getItem(STORAGE_KEYS.CURRENCY_PREFERENCE);
     } catch (error) {
       console.error('Error retrieving currency preference:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Store user's preferred account (by account ID)
+   */
+  static async setAccountPreference(accountId: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.ACCOUNT_PREFERENCE, accountId);
+    } catch (error) {
+      console.error('Error storing account preference:', error);
+      throw new Error('Failed to store account preference');
+    }
+  }
+
+  /**
+   * Retrieve user's preferred account ID
+   */
+  static async getAccountPreference(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(STORAGE_KEYS.ACCOUNT_PREFERENCE);
+    } catch (error) {
+      console.error('Error retrieving account preference:', error);
       return null;
     }
   }

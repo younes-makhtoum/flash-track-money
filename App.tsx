@@ -246,10 +246,21 @@ export default function App() {
     console.log('🔍 useEffect triggered - currentScreen:', currentScreen, 'token:', !!token, 'accounts length:', accounts.length);
     
     if (token && currentScreen === 'addTransaction') {
-      console.log('🚀 Triggering account and category fetch from useEffect');
-      fetchAccounts();
-      fetchCategories();
-      fetchTags();
+      // Only fetch if data is not already loaded or if explicitly needed
+      if (accounts.length === 0) {
+        console.log('🚀 Fetching accounts (not loaded yet)');
+        fetchAccounts();
+      }
+      
+      if (categories.length === 0) {
+        console.log('🚀 Fetching categories (not loaded yet)');
+        fetchCategories();
+      }
+      
+      if (availableTags.length === 0) {
+        console.log('🚀 Fetching tags (not loaded yet)');
+        fetchTags();
+      }
     }
   }, [token, currentScreen]);
 
@@ -404,8 +415,13 @@ export default function App() {
         if (physicalCashAccounts.length === 0) {
           console.log('⚠️ No physical cash accounts found after filtering');
         } else {
-          // Auto-select preferred account after accounts are loaded
-          setTimeout(() => autoSelectPreferredAccount(), 100);
+          // Auto-select preferred account only if no account is currently selected
+          if (!selectedAccount) {
+            console.log('🎯 No account selected, running auto-selection');
+            setTimeout(() => autoSelectPreferredAccount(), 100);
+          } else {
+            console.log('✅ Account already selected, keeping current selection:', selectedAccount);
+          }
         }
       } else {
         console.log('❌ No assets property in response');
@@ -669,6 +685,22 @@ export default function App() {
   // Auto-select account based on currency preference
   const autoSelectPreferredAccount = async () => {
     try {
+      // First check if user has a specific account preference (account ID)
+      const preferredAccountId = await SecureStorage.getAccountPreference();
+      if (preferredAccountId && accounts.length > 0) {
+        const preferredAccount = accounts.find(account => 
+          account.id.toString() === preferredAccountId
+        );
+        
+        if (preferredAccount) {
+          console.log('🎯 Using preferred account:', preferredAccount.display_name);
+          setSelectedAccount(preferredAccount.id.toString());
+          setSelectedAccountData(preferredAccount);
+          return;
+        }
+      }
+
+      // Fallback to currency preference if no specific account preference
       const preferredCurrency = await SecureStorage.getCurrencyPreference();
       if (preferredCurrency && accounts.length > 0) {
         // Find the first account with the preferred currency
@@ -677,6 +709,7 @@ export default function App() {
         );
         
         if (preferredAccount) {
+          console.log('💰 Using currency-based account:', preferredAccount.display_name);
           setSelectedAccount(preferredAccount.id.toString());
           setSelectedAccountData(preferredAccount);
           return;
@@ -685,6 +718,7 @@ export default function App() {
       
       // Fallback: select first account if no preference or no matching account
       if (accounts.length > 0) {
+        console.log('🔄 Using first available account:', accounts[0].display_name);
         setSelectedAccount(accounts[0].id.toString());
         setSelectedAccountData(accounts[0]);
       }
@@ -720,8 +754,10 @@ export default function App() {
     setHasReceipt(false);
     setCurrentTransactionId(null);
     
-    // Auto-select preferred account after reset
-    autoSelectPreferredAccount();
+    // Auto-select preferred account after reset (only if accounts exist)
+    if (accounts.length > 0) {
+      setTimeout(() => autoSelectPreferredAccount(), 50);
+    }
   };
 
   const fetchTransactions = async () => {
@@ -952,7 +988,11 @@ export default function App() {
     setAmount(Math.abs(parseFloat(transaction.amount || 0)).toString());
     setTransactionPayee(transaction.payee || '');
     setTransactionNote(transaction.notes || '');
-    setTransactionTags(transaction.tags || []);
+    // Ensure tags are always strings, not objects
+    const processedTags = (transaction.tags || []).map((tag: any) => 
+      typeof tag === 'object' ? (tag.name || tag.tag || tag.id || '') : tag
+    );
+    setTransactionTags(processedTags);
     
     // Set transaction date
     if (transaction.date) {
@@ -1096,15 +1136,34 @@ export default function App() {
 
     try {
       // Prepare transaction data for update
-      const updateData = {
+      const updateData: any = {
         payee: transactionPayee,
         notes: transactionNote,
         date: transactionDate.toISOString().split('T')[0], // Format as YYYY-MM-DD
         amount: Math.abs(parseFloat(amount)), // Always positive - category determines if income/expense
         category_id: selectedCategory ? parseInt(selectedCategory) : null,
-        account_id: selectedAccount ? parseInt(selectedAccount) : null,
         tags: transactionTags,
       };
+
+      // Add account information - use asset_id for physical cash accounts, account_id for others
+      if (selectedAccount) {
+        const accountInfo = accounts.find(acc => acc.id.toString() === selectedAccount);
+        if (accountInfo) {
+          // Update currency to match the selected account
+          if (accountInfo.currency) {
+            updateData.currency = accountInfo.currency;
+            console.log('💰 Setting currency from account:', accountInfo.currency);
+          }
+          
+          if (accountInfo.subtype_name === 'physical cash') {
+            updateData.asset_id = parseInt(selectedAccount);
+            console.log('🏦 Setting asset_id for physical cash account:', selectedAccount);
+          } else {
+            updateData.account_id = parseInt(selectedAccount);
+            console.log('🏦 Setting account_id for non-cash account:', selectedAccount);
+          }
+        }
+      }
 
       // Make PUT request to update transaction
       const response = await fetch(`${LUNCH_MONEY_API_URL}/transactions/${editingTransaction.id}`, {
@@ -1476,14 +1535,17 @@ export default function App() {
                       setSelectedAccount(account.id.toString());
                       setSelectedAccountData(account);
                       
-                      // Update currency preference based on selected account
-                      if (account.currency) {
-                        try {
+                      // Update both account and currency preferences
+                      try {
+                        await SecureStorage.setAccountPreference(account.id.toString());
+                        console.log('🎯 Updated account preference to:', account.display_name);
+                        
+                        if (account.currency) {
                           await SecureStorage.setCurrencyPreference(account.currency);
                           console.log('💰 Updated currency preference to:', account.currency);
-                        } catch (error) {
-                          console.error('Error updating currency preference:', error);
                         }
+                      } catch (error) {
+                        console.error('Error updating preferences:', error);
                       }
                       
                       setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
@@ -2028,10 +2090,7 @@ export default function App() {
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
-            onPress={() => {
-              resetTransactionForm();
-              setCurrentScreen('addTransaction');
-            }}
+            onPress={() => setCurrentScreen('addTransaction')}
           >
             <Text style={styles.closeIcon}>✕</Text>
           </TouchableOpacity>
