@@ -94,6 +94,9 @@ export default function App() {
   // Receipt gallery state
   const [showReceiptGallery, setShowReceiptGallery] = useState(false);
   const [galleryInitialIndex, setGalleryInitialIndex] = useState(0);
+  
+  // Local attachments mapping for all transactions
+  const [localAttachments, setLocalAttachments] = useState<{ [transactionId: string]: any[] }>({});
 
   // Helper functions for date formatting
   // Helper function to determine if an account can be edited for new transactions
@@ -124,12 +127,19 @@ export default function App() {
   const handleAttachmentAdded = (attachment: any) => {
     setTransactionAttachments(prev => [...prev, attachment]);
     setHasReceipt(true);
+    
+    // Update local attachments mapping if we have a valid transaction ID
+    if (attachment.transactionId && attachment.transactionId !== 'temp') {
+      loadLocalAttachments(); // Reload to get the latest state
+    }
   };
 
   const removeAttachment = async (attachmentId: string) => {
     if (currentTransactionId) {
       try {
         await SecureStorage.removeTransactionAttachment(currentTransactionId, attachmentId);
+        // Reload local attachments to reflect the removal
+        loadLocalAttachments();
       } catch (error) {
         Alert.alert('Error', 'Failed to remove attachment');
         return;
@@ -168,6 +178,38 @@ export default function App() {
       }
     }
     setCurrentTransactionId(transactionId);
+    
+    // Reload local attachments to include the newly linked ones
+    loadLocalAttachments();
+  };
+
+  // Load all local attachments from storage
+  const loadLocalAttachments = async () => {
+    try {
+      const allAttachments = await SecureStorage.getAllAttachments();
+      setLocalAttachments(allAttachments);
+    } catch (error) {
+      console.error('Failed to load local attachments:', error);
+    }
+  };
+
+  // Check if a transaction has local attachments
+  const hasLocalAttachments = (transactionId: string | number): boolean => {
+    const id = String(transactionId);
+    return localAttachments[id] && localAttachments[id].length > 0;
+  };
+
+  // Load attachments for a specific transaction in edit mode
+  const loadTransactionAttachments = async (transactionId: string | number) => {
+    try {
+      const id = String(transactionId);
+      const attachments = await SecureStorage.getTransactionAttachments(id);
+      setTransactionAttachments(attachments);
+      setCurrentTransactionId(id);
+      setHasReceipt(attachments.length > 0);
+    } catch (error) {
+      console.error('Failed to load transaction attachments:', error);
+    }
   };
 
   // Keypad functions
@@ -232,6 +274,11 @@ export default function App() {
   // Load saved token on app start
   useEffect(() => {
     loadSavedToken();
+  }, []);
+
+  // Load local attachments on app start
+  useEffect(() => {
+    loadLocalAttachments();
   }, []);
 
   // Load transactions when token is available
@@ -1252,6 +1299,9 @@ export default function App() {
     setTransactionType(originalType);
     // Store the original type for Plaid account restrictions
     setOriginalTransactionType(originalType);
+    
+    // Load local attachments for this transaction
+    loadTransactionAttachments(transaction.id);
   };
 
   // Function to save transaction changes
@@ -1383,7 +1433,7 @@ export default function App() {
               {(item.has_attachment || item.attachments?.length > 0) && (
                 <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
               )}
-              <Text style={styles.receiptIcon}>↔️</Text>
+              <Text style={styles.receiptIcon}>⏩</Text>
             </View>
             <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
           </View>
@@ -1417,10 +1467,10 @@ export default function App() {
           {/* Bottom line: Icons (left) and Account (right) */}
           <View style={styles.bottomLine}>
             <View style={styles.leftIcons}>
-              {(item.has_attachment || item.attachments?.length > 0) && (
+              {(item.has_attachment || item.attachments?.length > 0 || hasLocalAttachments(item.id)) && (
                 <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
               )}
-              <Text style={styles.receiptIcon}>📋</Text>
+              <Text style={styles.receiptIcon}>↩</Text>
             </View>
             <Text style={styles.account}>
               {item.account_display_name || 'Unknown Account'}
@@ -1511,7 +1561,7 @@ export default function App() {
         {/* Bottom line: Icons (left) and Account (right) */}
         <View style={styles.bottomLine}>
           <View style={styles.leftIcons}>
-            {(item.has_attachment || item.attachments?.length > 0) && (
+            {(item.has_attachment || item.attachments?.length > 0 || hasLocalAttachments(item.id)) && (
               <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
             )}
             {isRecurring && (
