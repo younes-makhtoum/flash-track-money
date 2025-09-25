@@ -262,6 +262,12 @@ export default function App() {
         fetchTags();
       }
     }
+    
+    // Also fetch tags when entering the tags selection screen
+    if (token && currentScreen === 'selectTags' && availableTags.length === 0) {
+      console.log('🏷️ Fetching tags for tags selection screen');
+      fetchTags();
+    }
   }, [token, currentScreen]);
 
   const loadSavedToken = async () => {
@@ -993,15 +999,139 @@ export default function App() {
       typeof tag === 'object' ? (tag.name || tag.tag || tag.id || '') : tag
     );
     setTransactionTags(processedTags);
+
+    // Check if this is a grouped transaction
+    const isGroupedTransaction = transaction.is_transfer || transaction.is_grouped_non_transfer;
     
     // Set transaction date
     if (transaction.date) {
       setTransactionDate(new Date(transaction.date));
     }
     
-    // Find and set account
-    if (transaction.account_id || transaction.plaid_account_id || transaction.asset_id) {
-      // Use the most reliable account identifier available
+    // Handle account display based on transaction type
+    if (isGroupedTransaction) {
+      // Special handling for grouped transactions
+      console.log('🔄 Handling grouped transaction account display');
+      
+      if (transaction.is_transfer) {
+        // Transfer between accounts: show "From Account -> To Account"
+        const fromAccount = transaction.from_account || 'Unknown Account';
+        const toAccount = transaction.to_account || 'Unknown Account';
+        const displayName = `${fromAccount} → ${toAccount}`;
+        
+        // Create a special account data object for display
+        const transferAccountData = {
+          id: 'grouped_transfer',
+          display_name: displayName,
+          name: displayName,
+          currency: transaction.currency || 'usd',
+          type_name: 'transfer',
+          subtype_name: 'grouped_transfer',
+          closed_on: null,
+          isTemporary: true,
+          isGroupedTransaction: true,
+          isEditable: false // Grouped transactions are not editable
+        };
+        
+        setSelectedAccount('grouped_transfer');
+        setSelectedAccountData(transferAccountData);
+        
+      } else if (transaction.is_grouped_non_transfer && transaction.group_children) {
+        // Payment + refund or similar: show detailed breakdown
+        const children = transaction.group_children;
+        const dates = transaction.group_dates || [];
+        
+        // Create display text for payment and refund
+        let displayName = 'Grouped Transaction';
+        if (children.length >= 2 && dates.length >= 2) {
+          console.log('🔍 Processing grouped non-transfer transaction:', {
+            children: children,
+            dates: dates,
+            transaction: transaction
+          });
+          
+          // Format dates as "MMM DD, YYYY" (e.g. "Sep. 25, 2025")
+          const formatGroupedDate = (dateString: string) => {
+            const date = new Date(dateString);
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+              'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = monthNames[date.getMonth()];
+            const day = date.getDate();
+            const year = date.getFullYear();
+            return `${month}. ${day}, ${year}`;
+          };
+          
+          // Try to get account names - first check if main transaction has account info, then check children
+          const getAccountName = (child: any, index: number) => {
+            console.log('🏦 Child transaction data:', child);
+            
+            // For grouped transactions, the main transaction already has the correct account_display_name
+            // This is the same logic used in the transaction list display
+            if (index === 0 && transaction.account_display_name && transaction.account_display_name !== 'Unknown Account') {
+              console.log('✅ Using main transaction account name:', transaction.account_display_name);
+              return transaction.account_display_name;
+            }
+            
+            // For additional children or if main account is unknown, try child account fields
+            return child?.account_display_name || 
+                   child?.plaid_account_display_name || 
+                   child?.asset_display_name || 
+                   child?.plaid_account_name ||
+                   child?.asset_name || 
+                   child?.account_name ||
+                   child?.account || 
+                   transaction.account_display_name || // Fallback to main transaction account
+                   'Unknown Account';
+          };
+          
+          // Format amount with currency
+          const formatAmount = (amount: number, currency: string) => {
+            const absAmount = Math.abs(amount);
+            const currencySymbol = currency?.toUpperCase() || 'USD';
+            return `${absAmount} ${currencySymbol}`;
+          };
+          
+          // Get transaction data for both children
+          const firstChild = children[0];
+          const secondChild = children[1];
+          const firstDate = formatGroupedDate(dates[0]);
+          const secondDate = formatGroupedDate(dates[1]);
+          const currency = transaction.currency || firstChild?.currency || 'USD';
+          
+          const firstAccount = getAccountName(firstChild, 0);
+          const secondAccount = getAccountName(secondChild, 1);
+          const firstAmount = formatAmount(parseFloat(firstChild?.amount || 0), currency);
+          const secondAmount = formatAmount(parseFloat(secondChild?.amount || 0), currency);
+          
+          console.log('💰 Formatted grouped transaction:', {
+            firstAmount,
+            secondAmount,
+            firstAccount,
+            secondAccount,
+            currency
+          });
+          
+          displayName = `Paid ${firstAmount} on ${firstDate} from ${firstAccount}\nRefunded ${secondAmount} on ${secondDate} to ${secondAccount}`;
+        }
+        
+        const groupedAccountData = {
+          id: 'grouped_non_transfer',
+          display_name: displayName,
+          name: displayName,
+          currency: transaction.currency || 'usd',
+          type_name: 'grouped',
+          subtype_name: 'grouped_non_transfer',
+          closed_on: null,
+          isTemporary: true,
+          isGroupedTransaction: true,
+          isEditable: false // Grouped transactions are not editable
+        };
+        
+        setSelectedAccount('grouped_non_transfer');
+        setSelectedAccountData(groupedAccountData);
+      }
+    } else if (transaction.account_id || transaction.plaid_account_id || transaction.asset_id) {
+      // Regular transaction handling
       const accountId = transaction.account_id || transaction.plaid_account_id || transaction.asset_id;
       console.log('🏦 Looking for account ID:', accountId, 'from transaction data:', {
         account_id: transaction.account_id,
@@ -1213,7 +1343,11 @@ export default function App() {
       await fetchCategories();
     }
     
-    populateEditForm(transaction);
+    // Wait a bit for state updates to complete, then populate form
+    setTimeout(() => {
+      populateEditForm(transaction);
+    }, 100);
+    
     setCurrentScreen('editTransaction');
   };
 
@@ -2367,6 +2501,13 @@ export default function App() {
 
   // Edit Transaction Screen
   if (currentScreen === 'editTransaction') {
+    // Check if this is a grouped transaction (transfer or payment+refund)
+    const isGroupedTransaction = editingTransaction && (
+      editingTransaction.is_transfer || 
+      editingTransaction.is_grouped_non_transfer ||
+      selectedAccountData?.isGroupedTransaction
+    );
+    
     return (
       <View style={[
         styles.transactionDetailsContainer,
@@ -2405,12 +2546,18 @@ export default function App() {
                       'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
                       [{ text: 'OK' }]
                     );
+                  } else if (isGroupedTransaction) {
+                    Alert.alert(
+                      'Date Not Editable',
+                      'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
+                      [{ text: 'OK' }]
+                    );
                   } else {
                     setShowDatePicker(true);
                   }
                 }}
               >
-                <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
+                <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
                   {formatDateForDisplay(transactionDate)}
                 </Text>
                 <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -2427,12 +2574,18 @@ export default function App() {
                       'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
                       [{ text: 'OK' }]
                     );
+                  } else if (isGroupedTransaction) {
+                    Alert.alert(
+                      'Time Not Editable',
+                      'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
+                      [{ text: 'OK' }]
+                    );
                   } else {
                     setShowTimePicker(true);
                   }
                 }}
               >
-                <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
+                <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
                   {formatTimeForDisplay(transactionDate)}
                 </Text>
                 <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -2444,25 +2597,33 @@ export default function App() {
           <View style={styles.detailsSection}>
             <Text style={styles.detailsLabel}>AMOUNT</Text>
             <View style={styles.amountInputContainer}>
-              <Text style={[styles.amountSign, transactionType === 'income' ? styles.positiveSign : styles.negativeSign]}>
-                {transactionType === 'income' ? '+' : '-'}
-              </Text>
+              {!isGroupedTransaction && (
+                <Text style={[styles.amountSign, transactionType === 'income' ? styles.positiveSign : styles.negativeSign]}>
+                  {transactionType === 'income' ? '+' : '-'}
+                </Text>
+              )}
               <TextInput
                 style={[
                   styles.amountInput,
-                  selectedAccountData?.isPlaidAccount && styles.inputDisabled
+                  (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled
                 ]}
                 placeholder="0.00"
                 placeholderTextColor="#A0A0A0"
                 value={amount}
-                onChangeText={selectedAccountData?.isPlaidAccount ? undefined : setAmount}
+                onChangeText={(selectedAccountData?.isPlaidAccount || isGroupedTransaction) ? undefined : setAmount}
                 keyboardType="numeric"
-                editable={!selectedAccountData?.isPlaidAccount}
+                editable={!selectedAccountData?.isPlaidAccount && !isGroupedTransaction}
                 onFocus={() => {
                   if (selectedAccountData?.isPlaidAccount) {
                     Alert.alert(
                       'Field Not Editable',
                       'Amount cannot be edited for bank transactions synced from your bank.',
+                      [{ text: 'OK' }]
+                    );
+                  } else if (isGroupedTransaction) {
+                    Alert.alert(
+                      'Field Not Editable',
+                      'Amount cannot be edited for grouped transactions. Only payee, notes, tags, and attachments can be modified.',
                       [{ text: 'OK' }]
                     );
                   }
@@ -2480,10 +2641,17 @@ export default function App() {
             <TouchableOpacity 
               style={[
                 styles.detailsInput,
-                selectedAccountData?.isEditable === false && styles.detailsInputDisabled
+                (selectedAccountData?.isEditable === false || isGroupedTransaction) && styles.detailsInputDisabled
               ]}
               onPress={() => {
-                if (selectedAccountData?.isEditable === false) {
+                if (isGroupedTransaction) {
+                  Alert.alert(
+                    'Account Not Editable', 
+                    'This is a grouped transaction. Account cannot be changed. Only payee, notes, tags, and attachments can be modified.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                } else if (selectedAccountData?.isEditable === false) {
                   // Determine the type of restriction
                   const isPhysicalCash = selectedAccountData.subtype_name === 'physical cash';
                   const isPlaidAccount = selectedAccountData.isPlaidAccount;
@@ -2539,8 +2707,21 @@ export default function App() {
           <View style={styles.detailsSection}>
             <Text style={styles.detailsLabel}>CATEGORY</Text>
             <TouchableOpacity 
-              style={styles.detailsInput}
-              onPress={() => setCurrentScreen('selectCategory')}
+              style={[
+                styles.detailsInput,
+                isGroupedTransaction && styles.detailsInputDisabled
+              ]}
+              onPress={() => {
+                if (isGroupedTransaction) {
+                  Alert.alert(
+                    'Category Not Editable',
+                    'This is a grouped transaction. Category cannot be changed. Only payee, notes, tags, and attachments can be modified.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                }
+                setCurrentScreen('selectCategory');
+              }}
             >
               <Text style={selectedCategory ? styles.detailsInputText : styles.detailsPlaceholder}>
                 {selectedCategoryData ? selectedCategoryData.name : 'Select Category'}
