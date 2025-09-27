@@ -122,6 +122,25 @@ export default function App() {
     return `${hours}:${minutes}`;
   };
 
+  // Check if time field should be shown in edit form
+  const shouldShowTimeField = (transaction: any): boolean => {
+    if (!transaction) return true; // Show for new transactions
+    
+    // Check if this is a Plaid transaction
+    const isPlaidTransaction = !!(transaction.plaid_account_id || 
+                                 transaction.plaid_account_display_name || 
+                                 (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+    
+    if (isPlaidTransaction) {
+      // For Plaid transactions, only show time field if there's meaningful datetime
+      const plaidDateTime = getPlaidDateTime(transaction);
+      return !!plaidDateTime;
+    }
+    
+    // For non-Plaid transactions, always show time field
+    return true;
+  };
+
   const formatDateToISO8601 = (date: Date) => {
     return date.toISOString();
   };
@@ -467,8 +486,8 @@ export default function App() {
           
           // Analyze the transaction types to determine if it's payment+refund or split payments
           const childrenAmounts = children.map((c: any) => parseFloat(c.amount || 0));
-          const positiveAmounts = childrenAmounts.filter(amount => amount > 0);
-          const negativeAmounts = childrenAmounts.filter(amount => amount < 0);
+          const positiveAmounts = childrenAmounts.filter((amount: number) => amount > 0);
+          const negativeAmounts = childrenAmounts.filter((amount: number) => amount < 0);
           
           // If we have both positive and negative amounts, it's likely payment + refund
           // If all amounts are of the same sign, it's likely split payments
@@ -1094,8 +1113,42 @@ export default function App() {
     }).replace(',', '.');
   };
 
+  // Extract datetime from Plaid metadata if available (only if has meaningful time)
+  const getPlaidDateTime = (transaction: any): Date | null => {
+    if (!transaction.plaid_metadata) return null;
+    
+    try {
+      const plaidMetadata = JSON.parse(transaction.plaid_metadata);
+      
+      // Only look for datetime field - if it has meaningful time data  
+      if (plaidMetadata.datetime) {
+        const plaidDate = new Date(plaidMetadata.datetime);
+        if (!isNaN(plaidDate.getTime())) {
+          // Check if it has meaningful time (not just 00:00:00 or 01:00:00)
+          const hours = plaidDate.getHours();
+          const minutes = plaidDate.getMinutes();
+          const seconds = plaidDate.getSeconds();
+          
+          const isDefaultTime = (hours === 0 && minutes === 0 && seconds === 0) || 
+                               (hours === 1 && minutes === 0 && seconds === 0);
+          
+          if (!isDefaultTime) {
+            return plaidDate;
+          }
+        }
+      }
+      
+      // Don't use 'date' field for time display - it typically doesn't have time info
+      // The 'date' field in Plaid metadata is usually just YYYY-MM-DD
+    } catch (e) {
+      console.warn('Failed to parse plaid_metadata for datetime:', e);
+    }
+    
+    return null;
+  };
+
   // Check if transaction has meaningful time data (not default times like 00:00 or 01:00)
-  const hasTransactionTime = (dateString: string, transactionId?: string | number): boolean => {
+  const hasTransactionTime = (dateString: string, transactionId?: string | number, transaction?: any): boolean => {
     // Helper function to check if time is meaningful (not default values)
     const isDefaultTime = (hours: number, minutes: number, seconds: number): boolean => {
       // Consider these as "default" times that shouldn't be displayed:
@@ -1105,13 +1158,32 @@ export default function App() {
              (hours === 1 && minutes === 0 && seconds === 0);
     };
 
-    // First check if the API date has meaningful time data
+    // For Plaid transactions, check Plaid metadata first
+    if (transaction) {
+      const plaidDateTime = getPlaidDateTime(transaction);
+      if (plaidDateTime) {
+        return !isDefaultTime(plaidDateTime.getHours(), plaidDateTime.getMinutes(), plaidDateTime.getSeconds());
+      }
+      
+      // Check if this is a Plaid transaction - if so, never fallback to API date
+      const isPlaidTransaction = !!(transaction.plaid_account_id || 
+                                   transaction.plaid_account_display_name || 
+                                   (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+      
+      if (isPlaidTransaction) {
+        // For Plaid transactions, if there's no meaningful datetime in plaid_metadata, 
+        // don't show time at all (don't fallback to API date)
+        return false;
+      }
+    }
+
+    // For non-Plaid transactions, check if the API date has meaningful time data
     const date = new Date(dateString);
     if (!isDefaultTime(date.getHours(), date.getMinutes(), date.getSeconds())) {
       return true;
     }
     
-    // Then check if we have stored metadata with meaningful datetime for app-created transactions
+    // Finally check if we have stored metadata with meaningful datetime for app-created transactions
     if (transactionId && localTransactionMetadata[String(transactionId)]) {
       const metadata = localTransactionMetadata[String(transactionId)];
       const fullDate = new Date(metadata.fullDatetime);
@@ -1123,25 +1195,37 @@ export default function App() {
     return false;
   };
 
-  // Format transaction time when available (from API date or stored metadata)
-  const formatTransactionTime = (dateString: string, transactionId?: string | number): string => {
+  // Format transaction time when available (from Plaid metadata, API date, or stored metadata)
+  const formatTransactionTime = (dateString: string, transactionId?: string | number, transaction?: any): string => {
+    // For Plaid transactions, check Plaid metadata first
+    if (transaction) {
+      const plaidDateTime = getPlaidDateTime(transaction);
+      if (plaidDateTime) {
+        return plaidDateTime.toLocaleTimeString('en-US', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        });
+      }
+    }
+
     // If metadata exists for this transaction, use the full datetime
     if (transactionId && localTransactionMetadata[String(transactionId)]) {
       const metadata = localTransactionMetadata[String(transactionId)];
       const fullDate = new Date(metadata.fullDatetime);
       return fullDate.toLocaleTimeString('en-US', {
-        hour: 'numeric',
+        hour: '2-digit',
         minute: '2-digit',
-        hour12: true
+        hour12: false
       });
     }
     
     // Otherwise use the API date
     const date = new Date(dateString);
     return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
+      hour: '2-digit',
       minute: '2-digit',
-      hour12: true
+      hour12: false
     });
   };
 
@@ -1197,9 +1281,37 @@ export default function App() {
     // Check if this is a grouped transaction
     const isGroupedTransaction = transaction.is_transfer || transaction.is_grouped_non_transfer;
     
-    // Set transaction date
+    // Set transaction date with proper time from Plaid metadata or local storage
     if (transaction.date) {
-      setTransactionDate(new Date(transaction.date));
+      const setDateWithTime = async () => {
+        try {
+          // First try to get time from Plaid metadata
+          const plaidTime = getPlaidDateTime(transaction);
+          if (plaidTime) {
+            console.log('📅 Using Plaid datetime for edit form:', plaidTime);
+            setTransactionDate(new Date(plaidTime));
+            return;
+          }
+
+          // Then try to get time from local metadata
+          const localMetadata = await SecureStorage.getTransactionMetadata(transaction.id.toString());
+          if (localMetadata?.fullDatetime) {
+            console.log('📅 Using local metadata datetime for edit form:', localMetadata.fullDatetime);
+            setTransactionDate(new Date(localMetadata.fullDatetime));
+            return;
+          }
+
+          // Fallback to API date (date-only)
+          console.log('📅 Using API date for edit form (no time available):', transaction.date);
+          setTransactionDate(new Date(transaction.date));
+        } catch (error) {
+          console.warn('Error setting transaction date in edit form:', error);
+          // Fallback to API date
+          setTransactionDate(new Date(transaction.date));
+        }
+      };
+
+      setDateWithTime();
     }
     
     // Handle account display based on transaction type
@@ -1536,6 +1648,22 @@ export default function App() {
       
       console.log('✅ Transaction updated successfully');
       
+      // Store updated transaction metadata with complete datetime
+      try {
+        await SecureStorage.storeTransactionMetadata({
+          transactionId: editingTransaction.id.toString(),
+          fullDatetime: transactionDate.toISOString(),
+          createdInApp: false // This is an edit of existing transaction
+        });
+        console.log('✅ Transaction metadata updated for ID:', editingTransaction.id);
+        
+        // Reload local metadata to reflect changes
+        await loadLocalTransactionMetadata();
+      } catch (error) {
+        console.log('⚠️ Failed to update transaction metadata:', error);
+        // Don't throw here as transaction was updated successfully
+      }
+      
       // Refresh transactions list
       await fetchTransactions();
       
@@ -1594,8 +1722,8 @@ export default function App() {
             </Text>
             <View style={styles.dateContainer}>
               <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
-              {hasTransactionTime(item.date, item.id) && (
-                <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+              {hasTransactionTime(item.date, item.id, item) && (
+                <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
               )}
             </View>
           </View>
@@ -1640,8 +1768,8 @@ export default function App() {
             </Text>
             <View style={styles.dateContainer}>
               <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
-              {hasTransactionTime(item.date, item.id) && (
-                <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+              {hasTransactionTime(item.date, item.id, item) && (
+                <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
               )}
             </View>
           </View>
@@ -1739,8 +1867,8 @@ export default function App() {
           </Text>
           <View style={styles.dateContainer}>
             <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
-            {hasTransactionTime(item.date, item.id) && (
-              <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+            {hasTransactionTime(item.date, item.id, item) && (
+              <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
             )}
           </View>
         </View>
@@ -2524,28 +2652,30 @@ export default function App() {
                   <Text style={styles.detailsDropdownIcon}>▼</Text>
                 </TouchableOpacity>
               </View>
-              <View style={styles.detailsHalfSection}>
-                <Text style={styles.detailsLabel}>TIME</Text>
-                <TouchableOpacity 
-                  style={styles.detailsDateButton}
-                  onPress={() => {
-                    if (selectedAccountData?.isPlaidAccount) {
-                      Alert.alert(
-                        'Time Not Editable',
-                        'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
-                        [{ text: 'OK' }]
-                      );
-                    } else {
-                      setShowTimePicker(true);
-                    }
-                  }}
-                >
-                  <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
-                    {formatTimeForDisplay(transactionDate)}
-                  </Text>
-                  <Text style={styles.detailsDropdownIcon}>▼</Text>
-                </TouchableOpacity>
-              </View>
+              {shouldShowTimeField(editingTransaction) && (
+                <View style={styles.detailsHalfSection}>
+                  <Text style={styles.detailsLabel}>TIME</Text>
+                  <TouchableOpacity 
+                    style={styles.detailsDateButton}
+                    onPress={() => {
+                      if (selectedAccountData?.isPlaidAccount) {
+                        Alert.alert(
+                          'Time Not Editable',
+                          'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                          [{ text: 'OK' }]
+                        );
+                      } else {
+                        setShowTimePicker(true);
+                      }
+                    }}
+                  >
+                    <Text style={[styles.detailsDateText, selectedAccountData?.isPlaidAccount && styles.inputDisabled]}>
+                      {formatTimeForDisplay(transactionDate)}
+                    </Text>
+                    <Text style={styles.detailsDropdownIcon}>▼</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
           {/* Tags Section - Moved here */}
@@ -2806,34 +2936,36 @@ export default function App() {
                 <Text style={styles.detailsDropdownIcon}>▼</Text>
               </TouchableOpacity>
             </View>
-            <View style={styles.detailsHalfSection}>
-              <Text style={styles.detailsLabel}>TIME</Text>
-              <TouchableOpacity 
-                style={styles.detailsDateButton}
-                onPress={() => {
-                  if (selectedAccountData?.isPlaidAccount) {
-                    Alert.alert(
-                      'Time Not Editable',
-                      'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
-                      [{ text: 'OK' }]
-                    );
-                  } else if (isGroupedTransaction) {
-                    Alert.alert(
-                      'Time Not Editable',
-                      'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
-                      [{ text: 'OK' }]
-                    );
-                  } else {
-                    setShowTimePicker(true);
-                  }
-                }}
-              >
-                <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
-                  {formatTimeForDisplay(transactionDate)}
-                </Text>
-                <Text style={styles.detailsDropdownIcon}>▼</Text>
-              </TouchableOpacity>
-            </View>
+            {shouldShowTimeField(editingTransaction) && (
+              <View style={styles.detailsHalfSection}>
+                <Text style={styles.detailsLabel}>TIME</Text>
+                <TouchableOpacity 
+                  style={styles.detailsDateButton}
+                  onPress={() => {
+                    if (selectedAccountData?.isPlaidAccount) {
+                      Alert.alert(
+                        'Time Not Editable',
+                        'This is a bank account transaction synced from your bank. Account, date and time cannot be changed.',
+                        [{ text: 'OK' }]
+                      );
+                    } else if (isGroupedTransaction) {
+                      Alert.alert(
+                        'Time Not Editable',
+                        'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
+                        [{ text: 'OK' }]
+                      );
+                    } else {
+                      setShowTimePicker(true);
+                    }
+                  }}
+                >
+                  <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
+                    {formatTimeForDisplay(transactionDate)}
+                  </Text>
+                  <Text style={styles.detailsDropdownIcon}>▼</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
 
           {/* Amount Section - Field 2 (only in edit mode) */}
