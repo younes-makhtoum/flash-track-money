@@ -10,12 +10,19 @@ interface TransactionAttachment {
   dateAdded: string;
 }
 
+interface TransactionMetadata {
+  transactionId: string;
+  fullDatetime: string; // Complete datetime when transaction was created in app
+  createdInApp: boolean; // Whether transaction was created in this app
+}
+
 const STORAGE_KEYS = {
   LM_API_TOKEN: '@lunch_money_api_token',
   USER_SETTINGS: '@user_settings',
   CURRENCY_PREFERENCE: '@currency_preference',
   ACCOUNT_PREFERENCE: '@account_preference',
   TRANSACTION_ATTACHMENTS: '@transaction_attachments',
+  TRANSACTION_METADATA: '@transaction_metadata',
 } as const;
 
 /**
@@ -221,6 +228,46 @@ export class SecureStorage {
     } catch (error) {
       console.error('Error removing transaction attachment:', error);
       throw new Error('Failed to remove attachment');
+    }
+  }
+
+  /**
+   * Store transaction metadata (datetime, app-created flag, etc.)
+   */
+  static async storeTransactionMetadata(metadata: TransactionMetadata): Promise<void> {
+    try {
+      const allMetadata = await this.getAllTransactionMetadata();
+      allMetadata[metadata.transactionId] = metadata;
+      await AsyncStorage.setItem(STORAGE_KEYS.TRANSACTION_METADATA, JSON.stringify(allMetadata));
+    } catch (error) {
+      console.error('Error storing transaction metadata:', error);
+      throw new Error('Failed to store transaction metadata');
+    }
+  }
+
+  /**
+   * Get metadata for a specific transaction
+   */
+  static async getTransactionMetadata(transactionId: string): Promise<TransactionMetadata | null> {
+    try {
+      const allMetadata = await this.getAllTransactionMetadata();
+      return allMetadata[transactionId] || null;
+    } catch (error) {
+      console.error('Error retrieving transaction metadata:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get all transaction metadata
+   */
+  static async getAllTransactionMetadata(): Promise<{ [transactionId: string]: TransactionMetadata }> {
+    try {
+      const metadataData = await AsyncStorage.getItem(STORAGE_KEYS.TRANSACTION_METADATA);
+      return metadataData ? JSON.parse(metadataData) : {};
+    } catch (error) {
+      console.error('Error retrieving all transaction metadata:', error);
+      return {};
     }
   }
 }

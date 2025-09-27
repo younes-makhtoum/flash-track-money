@@ -97,6 +97,9 @@ export default function App() {
   
   // Local attachments mapping for all transactions
   const [localAttachments, setLocalAttachments] = useState<{ [transactionId: string]: any[] }>({});
+  
+  // Local transaction metadata for app-created transactions
+  const [localTransactionMetadata, setLocalTransactionMetadata] = useState<{ [transactionId: string]: any }>({});
 
   // Helper functions for date formatting
   // Helper function to determine if an account can be edited for new transactions
@@ -193,10 +196,71 @@ export default function App() {
     }
   };
 
+  // Load all local transaction metadata from storage
+  const loadLocalTransactionMetadata = async () => {
+    try {
+      const allMetadata = await SecureStorage.getAllTransactionMetadata();
+      setLocalTransactionMetadata(allMetadata);
+    } catch (error) {
+      console.error('Failed to load local transaction metadata:', error);
+    }
+  };
+
   // Check if a transaction has local attachments
   const hasLocalAttachments = (transactionId: string | number): boolean => {
     const id = String(transactionId);
     return localAttachments[id] && localAttachments[id].length > 0;
+  };
+
+  // Check if account is a Plaid account and format display name with ⚡ icon
+  const formatAccountDisplayName = (transaction: any): string => {
+    // Get the account name
+    const accountName = transaction.account_display_name || 
+                       transaction.asset_display_name || 
+                       transaction.plaid_account_display_name || 
+                       transaction.account || 
+                       'Unknown Account';
+    
+    // Check if it's a Plaid account (has plaid-related fields)
+    const isPlaidAccount = !!(transaction.plaid_account_id || 
+                             transaction.plaid_account_display_name || 
+                             transaction.institution_name ||
+                             (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+    
+    return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+  };
+
+  // Format transfer account names with Plaid indicators
+  const formatTransferAccountNames = (fromAccount: string, toAccount: string): string => {
+    // For transfers, we can't easily detect if individual accounts are Plaid
+    // since the names come pre-formatted from the API processing
+    // We'll add a simple heuristic: if it contains institution names or typical Plaid patterns
+    const addPlaidIndicator = (accountName: string): string => {
+      // Common patterns that indicate Plaid accounts
+      const plaidPatterns = ['Checking', 'Savings', 'Credit Card', 'Plaid'];
+      const hasPlaidPattern = plaidPatterns.some(pattern => 
+        accountName.toLowerCase().includes(pattern.toLowerCase())
+      );
+      return hasPlaidPattern ? `⚡ ${accountName}` : accountName;
+    };
+
+    const formattedFrom = addPlaidIndicator(fromAccount);
+    const formattedTo = addPlaidIndicator(toAccount);
+    
+    return `${formattedFrom} → ${formattedTo}`;
+  };
+
+  // Format account name in selection screens with Plaid indicator
+  const formatAccountSelectionName = (account: any): string => {
+    const accountName = account.display_name || account.name;
+    
+    // Check if it's a Plaid account based on available fields
+    const isPlaidAccount = !!(account.plaid_account_id || 
+                             account.institution_name || 
+                             (account.type_name && 
+                              account.type_name.toLowerCase().includes('plaid')));
+    
+    return isPlaidAccount ? `⚡ ${accountName}` : accountName;
   };
 
   // Load attachments for a specific transaction in edit mode
@@ -279,6 +343,11 @@ export default function App() {
   // Load local attachments on app start
   useEffect(() => {
     loadLocalAttachments();
+  }, []);
+
+  // Load local transaction metadata on app start
+  useEffect(() => {
+    loadLocalTransactionMetadata();
   }, []);
 
   // Load transactions when token is available
@@ -393,8 +462,20 @@ export default function App() {
             };
           }
         } else {
-          // Handle non-transfer groups (like payment + refund)
+          // Handle non-transfer groups (like payment + refund vs split payments)
           console.log(`📋 Processing non-transfer group: ${transaction.category_name} with ${children.length} children`);
+          
+          // Analyze the transaction types to determine if it's payment+refund or split payments
+          const childrenAmounts = children.map((c: any) => parseFloat(c.amount || 0));
+          const positiveAmounts = childrenAmounts.filter(amount => amount > 0);
+          const negativeAmounts = childrenAmounts.filter(amount => amount < 0);
+          
+          // If we have both positive and negative amounts, it's likely payment + refund
+          // If all amounts are of the same sign, it's likely split payments
+          const isSplitPayment = (positiveAmounts.length === 0 && negativeAmounts.length === children.length) ||
+                                (negativeAmounts.length === 0 && positiveAmounts.length === children.length);
+          
+          console.log(`📊 Transaction analysis: ${positiveAmounts.length} positive, ${negativeAmounts.length} negative, isSplitPayment: ${isSplitPayment}`);
           
           // For non-transfer groups, calculate net amount and collect dates
           const totalAmount = parseFloat(transaction.amount || 0);
@@ -417,6 +498,7 @@ export default function App() {
             payee: transaction.payee || payees[0] || 'Unknown',
             notes: transaction.notes || `Grouped transaction (${children.length} items)`,
             is_grouped_non_transfer: true,
+            is_split_payment: isSplitPayment, // Add new flag to distinguish types
             group_dates: dates,
             group_children: children,
             amount: Math.abs(totalAmount), // Always show positive amount for grouped transactions
@@ -715,6 +797,19 @@ export default function App() {
         await linkAttachmentsToTransaction(createdTransactionId);
       }
       
+      // Store transaction metadata with complete datetime
+      try {
+        await SecureStorage.storeTransactionMetadata({
+          transactionId: createdTransactionId,
+          fullDatetime: transactionDate.toISOString(),
+          createdInApp: true
+        });
+        console.log('✅ Transaction metadata stored for ID:', createdTransactionId);
+      } catch (error) {
+        console.log('⚠️ Failed to store transaction metadata:', error);
+        // Don't throw here as transaction was created successfully
+      }
+      
       // Reset form and navigate back to transactions
       resetTransactionForm();
       setCurrentScreen('transactions');
@@ -999,6 +1094,57 @@ export default function App() {
     }).replace(',', '.');
   };
 
+  // Check if transaction has meaningful time data (not default times like 00:00 or 01:00)
+  const hasTransactionTime = (dateString: string, transactionId?: string | number): boolean => {
+    // Helper function to check if time is meaningful (not default values)
+    const isDefaultTime = (hours: number, minutes: number, seconds: number): boolean => {
+      // Consider these as "default" times that shouldn't be displayed:
+      // 00:00:00 (midnight) - typical API default
+      // 01:00:00 (1:00 AM) - typical form default
+      return (hours === 0 && minutes === 0 && seconds === 0) || 
+             (hours === 1 && minutes === 0 && seconds === 0);
+    };
+
+    // First check if the API date has meaningful time data
+    const date = new Date(dateString);
+    if (!isDefaultTime(date.getHours(), date.getMinutes(), date.getSeconds())) {
+      return true;
+    }
+    
+    // Then check if we have stored metadata with meaningful datetime for app-created transactions
+    if (transactionId && localTransactionMetadata[String(transactionId)]) {
+      const metadata = localTransactionMetadata[String(transactionId)];
+      const fullDate = new Date(metadata.fullDatetime);
+      if (!isDefaultTime(fullDate.getHours(), fullDate.getMinutes(), fullDate.getSeconds())) {
+        return true;
+      }
+    }
+    
+    return false;
+  };
+
+  // Format transaction time when available (from API date or stored metadata)
+  const formatTransactionTime = (dateString: string, transactionId?: string | number): string => {
+    // If metadata exists for this transaction, use the full datetime
+    if (transactionId && localTransactionMetadata[String(transactionId)]) {
+      const metadata = localTransactionMetadata[String(transactionId)];
+      const fullDate = new Date(metadata.fullDatetime);
+      return fullDate.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    }
+    
+    // Otherwise use the API date
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
   // Helper function to format amounts with spaces for thousands and comma for decimals
   const formatAmount = (amount: number): string => {
     // Convert to absolute value
@@ -1039,7 +1185,8 @@ export default function App() {
     
     // Basic transaction details
     setAmount(Math.abs(parseFloat(transaction.amount || 0)).toString());
-    setTransactionPayee(transaction.payee || '');
+    // Set payee to "N/A" for transfer transactions, otherwise use actual payee
+    setTransactionPayee(transaction.is_transfer ? 'N/A' : (transaction.payee || ''));
     setTransactionNote(transaction.notes || '');
     // Ensure tags are always strings, not objects
     const processedTags = (transaction.tags || []).map((tag: any) => 
@@ -1108,27 +1255,40 @@ export default function App() {
             return `${month}. ${day}, ${year}`;
           };
           
-          // Try to get account names - first check if main transaction has account info, then check children
+          // Try to get account names with Plaid indicators - first check if main transaction has account info, then check children
           const getAccountName = (child: any, index: number) => {
             console.log('🏦 Child transaction data:', child);
+            
+            let accountName;
+            let sourceData;
             
             // For grouped transactions, the main transaction already has the correct account_display_name
             // This is the same logic used in the transaction list display
             if (index === 0 && transaction.account_display_name && transaction.account_display_name !== 'Unknown Account') {
               console.log('✅ Using main transaction account name:', transaction.account_display_name);
-              return transaction.account_display_name;
+              accountName = transaction.account_display_name;
+              sourceData = transaction; // Use main transaction for Plaid detection
+            } else {
+              // For additional children or if main account is unknown, try child account fields
+              accountName = child?.account_display_name || 
+                           child?.plaid_account_display_name || 
+                           child?.asset_display_name || 
+                           child?.plaid_account_name ||
+                           child?.asset_name || 
+                           child?.account_name ||
+                           child?.account || 
+                           transaction.account_display_name || // Fallback to main transaction account
+                           'Unknown Account';
+              sourceData = child || transaction; // Use child data for Plaid detection
             }
             
-            // For additional children or if main account is unknown, try child account fields
-            return child?.account_display_name || 
-                   child?.plaid_account_display_name || 
-                   child?.asset_display_name || 
-                   child?.plaid_account_name ||
-                   child?.asset_name || 
-                   child?.account_name ||
-                   child?.account || 
-                   transaction.account_display_name || // Fallback to main transaction account
-                   'Unknown Account';
+            // Check if it's a Plaid account and add ⚡ indicator
+            const isPlaidAccount = !!(sourceData?.plaid_account_id || 
+                                     sourceData?.plaid_account_display_name || 
+                                     sourceData?.institution_name ||
+                                     (sourceData?.plaid_metadata && sourceData.plaid_metadata !== '{}'));
+            
+            return isPlaidAccount ? `⚡ ${accountName}` : accountName;
           };
           
           // Format amount with currency
@@ -1155,10 +1315,24 @@ export default function App() {
             secondAmount,
             firstAccount,
             secondAccount,
-            currency
+            currency,
+            isSplitPayment: transaction.is_split_payment
           });
           
-          displayName = `Paid ${firstAmount} on ${firstDate} from ${firstAccount}\nRefunded ${secondAmount} on ${secondDate} to ${secondAccount}`;
+          // Different display format for split payments vs payment+refund
+          if (transaction.is_split_payment) {
+            // Format as: Payment #1 of X EUR made on Date from Account, Payment #2 of...
+            const paymentLines = children.map((child: any, index: number) => {
+              const childDate = formatGroupedDate(child.date || dates[index] || dates[0]);
+              const childAccount = getAccountName(child, index);
+              const childAmount = formatAmount(Math.abs(parseFloat(child?.amount || 0)), currency);
+              return `Payment #${index + 1} of ${childAmount} made on ${childDate} from ${childAccount}`;
+            });
+            displayName = paymentLines.join('\n');
+          } else {
+            // Original payment + refund format
+            displayName = `Paid ${firstAmount} on ${firstDate} from ${firstAccount}\nRefunded ${secondAmount} on ${secondDate} to ${secondAccount}`;
+          }
         }
         
         const groupedAccountData = {
@@ -1412,17 +1586,22 @@ export default function App() {
 
       return (
         <TouchableOpacity onPress={() => handleTransactionPress(item)}>
-          <View style={styles.transactionCard}>
+          <View style={[styles.transactionCard, styles.transferCard]}>
           {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
             <Text style={[styles.amount, styles.transfer]}>
               {currency} {formatAmount(displayAmount)}
             </Text>
-            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+            <View style={styles.dateContainer}>
+              <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+              {hasTransactionTime(item.date, item.id) && (
+                <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+              )}
+            </View>
           </View>
           
           {/* Second line: Payee */}
-          <Text style={styles.payee}>{item.payee}</Text>
+          <Text style={styles.payee}>N/A</Text>
           
           {/* Third line: Notes (if available) */}
           {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
@@ -1435,27 +1614,36 @@ export default function App() {
               )}
               <Text style={styles.receiptIcon}>⏩</Text>
             </View>
-            <Text style={styles.account}>{item.from_account} → {item.to_account}</Text>
+            <Text style={styles.account}>{formatTransferAccountNames(item.from_account, item.to_account)}</Text>
           </View>
         </View>
         </TouchableOpacity>
       );
     }
     
-    // Handle grouped non-transfer transactions (like payment + refund)
+    // Handle grouped non-transfer transactions (like payment + refund vs split payments)
     if (item.is_grouped_non_transfer) {
       const amount = parseFloat(item.amount || 0);
       const displayAmount = Math.abs(amount);
+      
+      // Use expense styling for split payments, grouped styling for payment+refund
+      const cardStyle = item.is_split_payment ? styles.expenseCard : styles.groupedCard;
+      const amountStyle = item.is_split_payment ? styles.expense : styles.grouped;
 
       return (
         <TouchableOpacity onPress={() => handleTransactionPress(item)}>
-          <View style={styles.transactionCard}>
+          <View style={[styles.transactionCard, cardStyle]}>
           {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
-            <Text style={[styles.amount, styles.grouped]}>
+            <Text style={[styles.amount, amountStyle]}>
               {currency} {formatAmount(displayAmount)}
             </Text>
-            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+            <View style={styles.dateContainer}>
+              <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+              {hasTransactionTime(item.date, item.id) && (
+                <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+              )}
+            </View>
           </View>
           
           {/* Second line: Payee */}
@@ -1470,10 +1658,10 @@ export default function App() {
               {(item.has_attachment || item.attachments?.length > 0 || hasLocalAttachments(item.id)) && (
                 <Text style={[styles.receiptIcon, styles.iconSpacing]}>📎</Text>
               )}
-              <Text style={styles.receiptIcon}>↩</Text>
+              <Text style={styles.receiptIcon}>{item.is_split_payment ? '↔' : '↩'}</Text>
             </View>
             <Text style={styles.account}>
-              {item.account_display_name || 'Unknown Account'}
+              {formatAccountDisplayName(item)}
             </Text>
           </View>
         </View>
@@ -1543,13 +1731,18 @@ export default function App() {
 
     return (
       <TouchableOpacity onPress={() => handleTransactionPress(item)}>
-        <View style={styles.transactionCard}>
+        <View style={[styles.transactionCard, isIncome ? styles.incomeCard : styles.expenseCard]}>
         {/* First line: Amount (left) and Date (right) */}
         <View style={styles.transactionHeader}>
           <Text style={[styles.amount, isIncome ? styles.income : styles.expense]}>
             {!isIncome ? '-' : ''}{currency} {formatAmount(displayAmount)}
           </Text>
-          <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+          <View style={styles.dateContainer}>
+            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+            {hasTransactionTime(item.date, item.id) && (
+              <Text style={styles.time}>{formatTransactionTime(item.date, item.id)}</Text>
+            )}
+          </View>
         </View>
         
         {/* Second line: Payee */}
@@ -1569,7 +1762,7 @@ export default function App() {
             )}
           </View>
           <Text style={styles.account}>
-            {item.account_display_name || item.asset_display_name || item.plaid_account_display_name || item.account || 'Unknown Account'}
+            {formatAccountDisplayName(item)}
           </Text>
         </View>
       </View>
@@ -1740,7 +1933,7 @@ export default function App() {
                     </View>
                     <View style={styles.accountInfo}>
                       <Text style={styles.accountName}>
-                        {account.display_name || account.name}
+                        {formatAccountSelectionName(account)}
                       </Text>
                       <Text style={styles.accountType}>{accountTypeDisplay}</Text>
                     </View>
@@ -2722,7 +2915,7 @@ export default function App() {
               }}
             >
               <Text style={selectedAccount ? styles.detailsInputText : styles.detailsPlaceholder}>
-                {selectedAccountData ? selectedAccountData.display_name : 'Select Account'}
+                {selectedAccountData ? formatAccountSelectionName(selectedAccountData) : 'Select Account'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -3049,7 +3242,7 @@ export default function App() {
                 { textAlign: 'center' }
               ]}>
                 {selectedAccountData ? 
-                  `${selectedAccountData.display_name || selectedAccountData.name}` : 
+                  formatAccountSelectionName(selectedAccountData) : 
                   '👛 Pick account'
                 }
               </Text>
@@ -3463,7 +3656,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderLeftWidth: 4,
-    borderLeftColor: '#007AFF',
+    borderLeftColor: '#666666', // Neutral gray for base
   },
   transactionHeader: {
     flexDirection: 'row',
@@ -3500,6 +3693,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     fontWeight: '500',
+  },
+  dateContainer: {
+    alignItems: 'flex-end',
+  },
+  time: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '400',
+    marginTop: 2,
   },
   account: {
     fontSize: 14,
@@ -4709,5 +4911,23 @@ const styles = StyleSheet.create({
   inputDisabled: {
     color: '#9e9e9e',
     opacity: 0.6,
+  },
+  
+  // Transaction card variants with light accent backgrounds and distinct border colors
+  expenseCard: {
+    backgroundColor: '#fff5f5', // Very light red background
+    borderLeftColor: '#FF3B30', // Red border for expenses
+  },
+  incomeCard: {
+    backgroundColor: '#f0fff4', // Very light green background
+    borderLeftColor: '#34C759', // Green border for income
+  },
+  transferCard: {
+    backgroundColor: '#f0f8ff', // Very light blue background
+    borderLeftColor: '#007AFF', // Blue border for transfers
+  },
+  groupedCard: {
+    backgroundColor: '#faf0ff', // Very light purple background
+    borderLeftColor: '#8E44AD', // Purple border for grouped transactions
   },
 });
