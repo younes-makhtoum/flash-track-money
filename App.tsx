@@ -7,6 +7,9 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import AttachmentModal from './src/components/AttachmentModal';
 import ReceiptGallery from './src/components/ReceiptGallery';
 import { SecureStorage } from './src/utils/storage';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import Feather from 'react-native-vector-icons/Feather';
+import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 
 // Lunch Money API configuration
 const LUNCH_MONEY_API_URL = 'https://dev.lunchmoney.app/v1';
@@ -63,9 +66,152 @@ export default function App() {
   const [isSearching, setIsSearching] = useState(false);
   const [originalTransactionType, setOriginalTransactionType] = useState<'expense' | 'income' | null>(null);
   
-  // Category section expanded state
-  const [expensesExpanded, setExpensesExpanded] = useState(true);
-  const [incomesExpanded, setIncomesExpanded] = useState(false);
+  // Category section expanded state - now track individual category groups
+  const [expandedCategoryGroups, setExpandedCategoryGroups] = useState<{[key: string]: boolean}>({});
+
+  // Helper function to toggle category group expansion
+  const toggleCategoryGroup = (categoryGroupId: string) => {
+    setExpandedCategoryGroups(prev => ({
+      ...prev,
+      [categoryGroupId]: !prev[categoryGroupId]
+    }));
+  };
+
+  // Helper function to generate appropriate icons for categories and category groups
+  const getCategoryIcon = (name: string, isGroup: boolean = false, size: number = 20): React.ReactElement => {
+    const lowerName = name.toLowerCase();
+    
+    // Specific category group mappings from your screenshot
+    if (lowerName.includes('shared transport') || lowerName.includes('transport')) 
+      return <Feather name="truck" size={size} color="#333" />;
+    if (lowerName.includes('shopping')) 
+      return <Feather name="shopping-bag" size={size} color="#333" />;
+    if (lowerName.includes('spiritual')) 
+      return <Feather name="sun" size={size} color="#333" />;
+    if (lowerName.includes('sport') && lowerName.includes('co')) 
+      return <Feather name="activity" size={size} color="#333" />;
+    if (lowerName.includes('tech') && lowerName.includes('services')) 
+      return <Feather name="monitor" size={size} color="#333" />;
+    if (lowerName.includes('wealth moves')) 
+      return <Feather name="trending-up" size={size} color="#333" />;
+    if (lowerName.includes('allowances') || lowerName.includes('bonuses')) 
+      return <Feather name="gift" size={size} color="#333" />;
+    if (lowerName.includes('cashbacks')) 
+      return <Feather name="credit-card" size={size} color="#333" />;
+    if (lowerName.includes('business incomes') || lowerName.includes('business income')) 
+      return <Feather name="briefcase" size={size} color="#333" />;
+    if (lowerName.includes('investments')) 
+      return <Feather name="bar-chart-2" size={size} color="#333" />;
+    if (lowerName.includes('other incomes')) 
+      return <Feather name="dollar-sign" size={size} color="#333" />;
+    
+    // Food & Dining
+    if (lowerName.includes('food') || lowerName.includes('restaurant') || lowerName.includes('dining') || lowerName.includes('meal')) 
+      return <MaterialIcons name="restaurant" size={size} color="#333" />;
+    if (lowerName.includes('coffee') || lowerName.includes('cafe')) 
+      return <MaterialIcons name="local-cafe" size={size} color="#333" />;
+    if (lowerName.includes('groceries') || lowerName.includes('grocery') || lowerName.includes('supermarket')) 
+      return <Feather name="shopping-cart" size={size} color="#333" />;
+    if (lowerName.includes('fast food') || lowerName.includes('takeout')) 
+      return <MaterialIcons name="fastfood" size={size} color="#333" />;
+    
+    // Transportation (non-shared)
+    if (lowerName.includes('gas') || lowerName.includes('fuel') || lowerName.includes('petrol')) 
+      return <MaterialIcons name="local-gas-station" size={size} color="#333" />;
+    if (lowerName.includes('uber') || lowerName.includes('taxi') || lowerName.includes('rideshare') || lowerName.includes('car')) 
+      return <MaterialIcons name="directions-car" size={size} color="#333" />;
+    if (lowerName.includes('public transport') || lowerName.includes('bus') || lowerName.includes('train')) 
+      return <MaterialIcons name="directions-bus" size={size} color="#333" />;
+    if (lowerName.includes('parking')) 
+      return <MaterialIcons name="local-parking" size={size} color="#333" />;
+    if (lowerName.includes('flight') || lowerName.includes('airline') || lowerName.includes('plane')) 
+      return <Feather name="plane" size={size} color="#333" />;
+    
+    // Shopping (specific categories)
+    if (lowerName.includes('clothing') || lowerName.includes('clothes') || lowerName.includes('fashion')) 
+      return <Feather name="shopping-bag" size={size} color="#333" />;
+    if (lowerName.includes('electronics')) 
+      return <Feather name="smartphone" size={size} color="#333" />;
+    if (lowerName.includes('books') || lowerName.includes('book')) 
+      return <Feather name="book-open" size={size} color="#333" />;
+    if (lowerName.includes('pharmacy') || lowerName.includes('medicine')) 
+      return <MaterialIcons name="local-pharmacy" size={size} color="#333" />;
+    
+    // Bills & Utilities
+    if (lowerName.includes('electricity') || lowerName.includes('power') || lowerName.includes('utility')) 
+      return <Feather name="zap" size={size} color="#333" />;
+    if (lowerName.includes('water')) 
+      return <Feather name="droplet" size={size} color="#333" />;
+    if (lowerName.includes('internet') || lowerName.includes('wifi')) 
+      return <Feather name="wifi" size={size} color="#333" />;
+    if (lowerName.includes('phone') || lowerName.includes('mobile') || lowerName.includes('cell')) 
+      return <Feather name="phone" size={size} color="#333" />;
+    if (lowerName.includes('rent') || lowerName.includes('housing') || lowerName.includes('home') || lowerName.includes('house') || lowerName.includes('mortgage')) 
+      return <Feather name="home" size={size} color="#333" />;
+    
+    // Entertainment
+    if (lowerName.includes('movie') || lowerName.includes('cinema') || lowerName.includes('entertainment')) 
+      return <Feather name="film" size={size} color="#333" />;
+    if (lowerName.includes('music') || lowerName.includes('spotify') || lowerName.includes('streaming')) 
+      return <Feather name="music" size={size} color="#333" />;
+    if (lowerName.includes('game') || lowerName.includes('gaming')) 
+      return <MaterialIcons name="sports-esports" size={size} color="#333" />;
+    if (lowerName.includes('sport') || lowerName.includes('gym') || lowerName.includes('fitness') || lowerName.includes('workout')) 
+      return <Feather name="activity" size={size} color="#333" />;
+    
+    // Health & Medical
+    if (lowerName.includes('doctor') || lowerName.includes('medical') || lowerName.includes('hospital') || lowerName.includes('health')) 
+      return <Feather name="heart" size={size} color="#333" />;
+    if (lowerName.includes('dental') || lowerName.includes('dentist')) 
+      return <MaterialIcons name="healing" size={size} color="#333" />;
+    
+    // Business & Work
+    if (lowerName.includes('office') || lowerName.includes('business') || lowerName.includes('work')) 
+      return <Feather name="briefcase" size={size} color="#333" />;
+    if (lowerName.includes('salary') || lowerName.includes('income') || lowerName.includes('wage')) 
+      return <Feather name="dollar-sign" size={size} color="#333" />;
+    if (lowerName.includes('investment') || lowerName.includes('dividend')) 
+      return <Feather name="trending-up" size={size} color="#333" />;
+    
+    // Financial & Banking
+    if (lowerName.includes('transfer')) 
+      return <Feather name="arrow-left-right" size={size} color="#333" />;
+    if (lowerName.includes('cash')) 
+      return <MaterialIcons name="payments" size={size} color="#333" />;
+    if (lowerName.includes('bank') || lowerName.includes('finance')) 
+      return <Feather name="credit-card" size={size} color="#333" />;
+    if (lowerName.includes('insurance')) 
+      return <Feather name="shield" size={size} color="#333" />;
+    
+    // Education & Learning
+    if (lowerName.includes('education') || lowerName.includes('school') || lowerName.includes('learning')) 
+      return <Feather name="book" size={size} color="#333" />;
+    
+    // Travel & Tourism
+    if (lowerName.includes('travel') || lowerName.includes('vacation') || lowerName.includes('hotel') || lowerName.includes('accommodation')) 
+      return <Feather name="map-pin" size={size} color="#333" />;
+    
+    // Technology & Services
+    if (lowerName.includes('tech') || lowerName.includes('software') || lowerName.includes('subscription')) 
+      return <Feather name="monitor" size={size} color="#333" />;
+    
+    // Other categories
+    if (lowerName.includes('gift') || lowerName.includes('present')) 
+      return <Feather name="gift" size={size} color="#333" />;
+    if (lowerName.includes('tax')) 
+      return <Feather name="file-text" size={size} color="#333" />;
+    if (lowerName.includes('pet')) 
+      return <Feather name="heart" size={size} color="#333" />;
+    if (lowerName.includes('charity') || lowerName.includes('donation')) 
+      return <Feather name="heart" size={size} color="#333" />;
+    
+    // Default fallback based on group vs category
+    if (isGroup) {
+      return <Feather name="folder" size={size} color="#333" />;
+    } else {
+      return <Feather name="tag" size={size} color="#333" />;
+    }
+  };
   
   // Tag-related state
   const [availableTags, setAvailableTags] = useState<string[]>([]);
@@ -1886,7 +2032,7 @@ export default function App() {
           onPress={() => handleTransactionPress(item)}
           onLongPress={() => {
             // Debug: Show Plaid detection info on long press
-            const childrenInfo = item.group_children?.map((child, i) => 
+            const childrenInfo = item.group_children?.map((child: any, i: number) => 
               `Child ${i+1}: ${child.account_display_name || 'No Name'} (Plaid: ${!!(child.plaid_account_id || child.plaid_account_display_name || child.institution_name)})`
             ).join('\n') || 'No children';
             
@@ -2221,17 +2367,41 @@ export default function App() {
     );
   }
 
-  // Category Selection Screen (Groups)
+  // Category Selection Screen (Redesigned)
   if (currentScreen === 'selectCategory') {
     const categoryGroups = categories.filter(cat => cat.is_group === true);
     
-    // Filter categories based on search query
-    const filteredCategoryGroups = categorySearchQuery.trim() === '' 
-      ? categoryGroups 
-      : categoryGroups.filter(cat => 
+    // Get all categories for search functionality
+    const allCategories = categories.filter(cat => !cat.is_group);
+    
+    // Filter categories based on search query - search through actual categories, not groups
+    const filteredCategories = categorySearchQuery.trim() === '' 
+      ? allCategories 
+      : allCategories.filter(cat => 
           cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()) ||
           (cat.description && cat.description.toLowerCase().includes(categorySearchQuery.toLowerCase()))
         );
+
+    // Group filtered categories by their parent group
+    const categoriesByGroup: {[key: string]: any[]} = {};
+    const groupsToAutoExpand: {[key: string]: boolean} = {};
+    
+    if (categorySearchQuery.trim() === '') {
+      // No search - show all categories organized by groups
+      categoryGroups.forEach(group => {
+        categoriesByGroup[group.id] = allCategories.filter(cat => cat.group_id === group.id);
+      });
+    } else {
+      // Search active - group filtered results by their parent groups
+      filteredCategories.forEach(cat => {
+        if (!categoriesByGroup[cat.group_id]) {
+          categoriesByGroup[cat.group_id] = [];
+        }
+        categoriesByGroup[cat.group_id].push(cat);
+        // Mark this group for auto-expansion
+        groupsToAutoExpand[cat.group_id] = true;
+      });
+    }
 
     return (
       <View style={styles.categorySelectionContainer}>
@@ -2239,7 +2409,7 @@ export default function App() {
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
             <Text style={styles.settingsIcon}>🔀</Text>
-            <Text style={styles.appName}>Pick category</Text>
+            <Text style={styles.appName}>Pick a category</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
@@ -2254,7 +2424,7 @@ export default function App() {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search"
+            placeholder="Search categories..."
             value={categorySearchQuery}
             onChangeText={setCategorySearchQuery}
             placeholderTextColor="#666"
@@ -2262,204 +2432,75 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.categoryContent}>
-          {/* Expense Categories Section */}
-          <View style={[styles.categorySection, styles.expenseCategorySection]}>
-            <TouchableOpacity 
-              style={styles.collapsibleHeader}
-              onPress={() => setExpensesExpanded(!expensesExpanded)}
-            >
-              <Text style={styles.categorySectionTitle}>EXPENSES</Text>
-              <Text style={styles.expandIcon}>{expensesExpanded ? '▼' : '▶'}</Text>
-            </TouchableOpacity>
-            {expensesExpanded && (
-              <View>
-                {filteredCategoryGroups
-                  .filter(cat => !cat.is_income) // Expense categories
-                  .map((category) => (
-                    <TouchableOpacity
-                      key={category.id}
-                      style={styles.categoryItem}
-                      onPress={() => {
-                        setSelectedCategoryGroup(category);
-                        setCurrentScreen('selectSubcategory');
-                      }}
-                    >
-                      <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
-                        <Text style={styles.categoryIconText}>
-                          {category.name.charAt(0).toUpperCase()}
+          {categoryGroups
+            .filter(group => categoriesByGroup[group.id] && categoriesByGroup[group.id].length > 0)
+            .sort((a, b) => {
+              // Sort so that expense categories come first, then income categories
+              if (a.is_income && !b.is_income) return 1;
+              if (!a.is_income && b.is_income) return -1;
+              return 0;
+            })
+            .map((categoryGroup) => {
+              const isExpanded = expandedCategoryGroups[categoryGroup.id] || groupsToAutoExpand[categoryGroup.id];
+              const groupCategories = categoriesByGroup[categoryGroup.id] || [];
+              const isIncome = categoryGroup.is_income;
+              
+              return (
+                <View key={categoryGroup.id} style={styles.categorySection}>
+                  {/* Category Group Header */}
+                  <TouchableOpacity 
+                    style={styles.collapsibleHeader}
+                    onPress={() => toggleCategoryGroup(categoryGroup.id)}
+                  >
+                    <View style={styles.categoryGroupHeader}>
+                      <View style={styles.categoryGroupInfo}>
+                        <View style={[styles.categoryTypeBar, { 
+                          backgroundColor: isIncome ? '#34C759' : '#FF3B30' 
+                        }]} />
+                        <View style={styles.categoryGroupIconContainer}>
+                          {getCategoryIcon(categoryGroup.name, true, 22)}
+                        </View>
+                        <Text style={styles.categoryGroupName} numberOfLines={1} ellipsizeMode="tail">
+                          {categoryGroup.name}
                         </Text>
                       </View>
-                      <Text style={styles.categoryName}>{category.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-            )}
-          </View>
-
-          {/* Income Categories Section */}
-          <View style={[styles.categorySection, styles.incomeCategorySection]}>
-            <TouchableOpacity 
-              style={styles.collapsibleHeader}
-              onPress={() => setIncomesExpanded(!incomesExpanded)}
-            >
-              <Text style={styles.categorySectionTitle}>INCOMES</Text>
-              <Text style={styles.expandIcon}>{incomesExpanded ? '▼' : '▶'}</Text>
-            </TouchableOpacity>
-            {incomesExpanded && (
-              <View>
-                {filteredCategoryGroups
-                  .filter(cat => cat.is_income) // Income categories
-                  .map((category) => (
-                    <TouchableOpacity
-                      key={category.id}
-                      style={styles.categoryItem}
-                      onPress={() => {
-                        setSelectedCategoryGroup(category);
-                        setCurrentScreen('selectSubcategory');
-                      }}
-                    >
-                      <View style={[styles.categoryIcon, { backgroundColor: category.color || '#4A90E2' }]}>
-                        <Text style={styles.categoryIconText}>
-                          {category.name.charAt(0).toUpperCase()}
-                        </Text>
+                      <View style={styles.categoryGroupRight}>
+                        <Text style={styles.expandIcon}>{isExpanded ? '▼' : '▶'}</Text>
                       </View>
-                      <Text style={styles.categoryName}>{category.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-              </View>
-            )}
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
+                    </View>
+                  </TouchableOpacity>
 
-  // Category Subcategory Selection Screen
-  if (currentScreen === 'selectSubcategory' && selectedCategoryGroup) {
-    const subcategories = categories.filter(cat => 
-      cat.group_id === selectedCategoryGroup.id && !cat.is_group
-    );
-    
-    // Filter subcategories based on search query
-    const filteredSubcategories = categorySearchQuery.trim() === '' 
-      ? subcategories 
-      : subcategories.filter(cat => 
-          cat.name.toLowerCase().includes(categorySearchQuery.toLowerCase()) ||
-          (cat.description && cat.description.toLowerCase().includes(categorySearchQuery.toLowerCase()))
-        );
-
-    return (
-      <View style={styles.categorySelectionContainer}>
-        {/* Header */}
-        <View style={styles.topBanner}>
-          <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>📂</Text>
-            <Text style={styles.appName}>{selectedCategoryGroup.name}</Text>
-          </View>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => setCurrentScreen('selectCategory')}
-          >
-            <Text style={styles.closeIcon}>←</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Search Section */}
-        <View style={styles.searchBanner}>
-          <Text style={styles.searchIcon}>🔍</Text>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search"
-            value={categorySearchQuery}
-            onChangeText={setCategorySearchQuery}
-            placeholderTextColor="#666"
-          />
-        </View>
-
-        <ScrollView style={styles.categoryContent}>
-          {/* Only show subcategories - no category group selection allowed */}
-          {filteredSubcategories.length > 0 ? (
-            <View style={styles.categorySection}>
-              {filteredSubcategories.map((category) => (
-                <TouchableOpacity
-                  key={category.id}
-                  style={styles.categoryItem}
-                  onPress={() => {
-                    console.log(`📂 Selected subcategory: ${category.name}, is_income: ${category.is_income}`);
-                    
-                    // Check if this is a Plaid account with a type conflict
-                    if (selectedAccountData?.isPlaidAccount && isEditMode && editingTransaction) {
-                      const newTransactionType = category.is_income ? 'income' : 'expense';
-                      
-                      // Determine original transaction type from Plaid metadata if available
-                      let originalPlaidType = null;
-                      if (editingTransaction.plaid_metadata) {
-                        try {
-                          const plaidMetadata = JSON.parse(editingTransaction.plaid_metadata);
-                          let hasPlaidDebitCredit = false;
-                          
-                          if (plaidMetadata.category && Array.isArray(plaidMetadata.category)) {
-                            hasPlaidDebitCredit = plaidMetadata.category.includes('Credit') || plaidMetadata.category.includes('Debit');
-                            
-                            if (hasPlaidDebitCredit) {
-                              originalPlaidType = plaidMetadata.category.includes('Credit') ? 'income' : 'expense';
-                            }
-                          }
-                          
-                          // Fallback: If no Credit/Debit classification, use amount-based logic
-                          if (!hasPlaidDebitCredit) {
-                            const amount = parseFloat(editingTransaction.amount) || 0;
-                            // For Plaid: negative amounts = income, positive = expense
-                            originalPlaidType = amount < 0 ? 'income' : 'expense';
-
-                          }
-                        } catch (e) {
-                          console.warn('Failed to parse plaid_metadata for conflict check:', e);
-                        }
-                      }
-                      
-                      // For Plaid transactions, ALWAYS use the immutable Plaid metadata type
-                      // Don't use originalTransactionType as it can change when user modifies categories
-                      const originalType = originalPlaidType;
-                      
-                      if (originalType && newTransactionType !== originalType) {
-                        Alert.alert(
-                          'Category Type Conflict',
-                          `This is a bank account transaction synced from your bank as ${originalType === 'income' ? 'an income' : 'an expense'}. You cannot assign ${newTransactionType === 'income' ? 'an income' : 'an expense'} category to it.`,
-                          [{ text: 'OK' }]
-                        );
-                        return;
-                      }
-                    }
-                    
-                    setSelectedCategory(category.id.toString());
-                    setSelectedCategoryData(category);
-                    // Switch transaction type based on category's is_income property
-                    const newTransactionType = category.is_income ? 'income' : 'expense';
-                    setTransactionType(newTransactionType);
-                    console.log(`💰 Transaction type switched to: ${newTransactionType}`);
-                    setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
-                  }}
-                >
-                  <View style={[styles.categoryIcon, { backgroundColor: category.color || selectedCategoryGroup.color || '#4A90E2' }]}>
-                    <Text style={styles.categoryIconText}>
-                      {category.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.categoryInfo}>
-                    <Text style={styles.categoryName}>{category.name}</Text>
-                    {category.description && (
-                      <Text style={styles.categoryDescription}>{category.description}</Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.categorySection}>
-              <Text style={styles.categorySectionTitle}>No subcategories available</Text>
-            </View>
-          )}
+                  {/* Category Group Items */}
+                  {isExpanded && (
+                    <View style={styles.categorySubItems}>
+                      {groupCategories.map((category) => (
+                        <TouchableOpacity
+                          key={category.id}
+                          style={styles.subcategoryItem}
+                          onPress={() => {
+                            console.log(`📂 Selected category: ${category.name}, is_income: ${category.is_income}`);
+                            setSelectedCategory(category.id);
+                            setSelectedCategoryData(category);
+                            setSelectedCategoryGroup(categoryGroup);
+                            setCategorySearchQuery('');
+                            setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction');
+                          }}
+                        >
+                          <View style={styles.subcategoryInfo}>
+                            <View style={styles.subcategoryIconContainer}>
+                              {getCategoryIcon(category.name, false, 18)}
+                            </View>
+                            <Text style={styles.subcategoryName} numberOfLines={1} ellipsizeMode="tail">
+                              {category.name}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
         </ScrollView>
       </View>
     );
@@ -4373,7 +4414,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   categorySection: {
-    marginBottom: 20,
+    marginBottom: 0, // Remove space between category groups
   },
   categorySectionTitle: {
     fontSize: 14,
@@ -4402,7 +4443,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: 'rgba(0,0,0,0.05)',
+    backgroundColor: 'white', // Remove grey background
   },
   expandIcon: {
     fontSize: 16,
@@ -4467,6 +4508,78 @@ const styles = StyleSheet.create({
   },
   categoryInfo: {
     flex: 1,
+  },
+  // New styles for redesigned category selection
+  categoryGroupHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flex: 1,
+  },
+  categoryGroupInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  categoryGroupName: {
+    fontSize: 19, // Larger font for category groups
+    fontWeight: '600',
+    color: '#333',
+    flex: 1, // Allow text to take available space
+    marginRight: 12, // Space before the arrow
+  },
+  categoryGroupRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryTypeBar: {
+    width: 4,
+    height: 20,
+    borderRadius: 2,
+    marginRight: 12, // Space between bar and icon (same as icon to text spacing)
+  },
+  categorySubItems: {
+    backgroundColor: 'white',
+  },
+  subcategoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingLeft: 76, // Align icon with group text start (20 + 4 + 12 + 28 + 12 = 76px)
+    paddingRight: 20,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  subcategoryInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  categoryGroupIconContainer: {
+    marginRight: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#F8F8F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  subcategoryIconContainer: {
+    marginRight: 12,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F8F8F8',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  subcategoryName: {
+    fontSize: 16, // Smaller than category groups but still readable
+    fontWeight: '400',
+    color: '#333',
+    flex: 1, // Allow text to take available space
+    marginRight: 12, // Space before the arrow, same as icon spacing
   },
   categoryDescription: {
     fontSize: 14,
