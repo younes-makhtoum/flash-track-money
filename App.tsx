@@ -240,33 +240,114 @@ export default function App() {
                        transaction.account || 
                        'Unknown Account';
     
-    // Check if it's a Plaid account (has plaid-related fields)
-    const isPlaidAccount = !!(transaction.plaid_account_id || 
-                             transaction.plaid_account_display_name || 
-                             transaction.institution_name ||
-                             (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+    console.log('🔍 formatAccountDisplayName called for:', accountName);
+    console.log('🔍 Transaction type:', { 
+      is_grouped_non_transfer: transaction.is_grouped_non_transfer,
+      has_group_children: !!(transaction.group_children),
+      children_count: transaction.group_children?.length || 0
+    });
     
-    return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+    // Check if it's a Plaid account (has plaid-related fields)
+    let isPlaidAccount = !!(transaction.plaid_account_id || 
+                           transaction.plaid_account_display_name || 
+                           transaction.institution_name ||
+                           (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+    
+    // For grouped non-transfer transactions, also check children for Plaid metadata
+    if (!isPlaidAccount && transaction.is_grouped_non_transfer && transaction.group_children) {
+      console.log('🔍 Checking group_children for Plaid metadata...');
+      
+      // Check all children for any Plaid indicators - if any child is Plaid, the account is Plaid
+      for (const child of transaction.group_children) {
+        const childHasPlaid = !!(child.plaid_account_id || 
+                                child.plaid_account_display_name || 
+                                child.institution_name ||
+                                (child.plaid_metadata && child.plaid_metadata !== '{}'));
+        
+        console.log(`🔍 Child ${child.id} Plaid check:`, {
+          account_display_name: child.account_display_name,
+          plaid_account_id: !!child.plaid_account_id,
+          plaid_account_display_name: !!child.plaid_account_display_name,
+          institution_name: !!child.institution_name,
+          has_plaid_metadata: !!(child.plaid_metadata && child.plaid_metadata !== '{}'),
+          is_plaid: childHasPlaid
+        });
+        
+        if (childHasPlaid) {
+          console.log('✅ Found Plaid child, marking account as Plaid');
+          isPlaidAccount = true;
+          break; // Found one Plaid child, that's enough
+        }
+      }
+    }
+    
+    const result = isPlaidAccount ? `⚡ ${accountName}` : accountName;
+    console.log('🎯 formatAccountDisplayName result:', result);
+    return result;
   };
 
-  // Format transfer account names with Plaid indicators
-  const formatTransferAccountNames = (fromAccount: string, toAccount: string): string => {
-    // For transfers, we can't easily detect if individual accounts are Plaid
-    // since the names come pre-formatted from the API processing
-    // We'll add a simple heuristic: if it contains institution names or typical Plaid patterns
-    const addPlaidIndicator = (accountName: string): string => {
-      // Common patterns that indicate Plaid accounts
-      const plaidPatterns = ['Checking', 'Savings', 'Credit Card', 'Plaid'];
-      const hasPlaidPattern = plaidPatterns.some(pattern => 
-        accountName.toLowerCase().includes(pattern.toLowerCase())
-      );
-      return hasPlaidPattern ? `⚡ ${accountName}` : accountName;
+  // Format transfer account names with Plaid indicators using transaction data
+  const formatTransferAccountNames = (fromAccount: string, toAccount: string, transaction?: any): string => {
+    console.log('🔍 formatTransferAccountNames called with:', { fromAccount, toAccount, hasTransaction: !!transaction });
+    
+    const addPlaidIndicator = (accountName: string, isFromAccount: boolean): string => {
+      if (!transaction) {
+        console.log('⚠️ No transaction data available for Plaid detection');
+        return accountName;
+      }
+      
+      console.log(`🔍 Checking Plaid indicator for ${accountName} (${isFromAccount ? 'from' : 'to'} account)`);
+      
+      // Check for transfer_children first (new preserved data)
+      const childrenToCheck = transaction.transfer_children || transaction.children;
+      console.log('🔍 Children to check:', childrenToCheck?.length || 0);
+      
+      if (childrenToCheck && Array.isArray(childrenToCheck)) {
+        // For transfers, find the child transaction that matches this account
+        const matchingChild = childrenToCheck.find((child: any) => {
+          const childAccountName = child.account_display_name || 
+                                  child.plaid_account_display_name || 
+                                  child.asset_display_name || 
+                                  child.account || 
+                                  'Unknown Account';
+          console.log(`🔍 Comparing child account "${childAccountName}" with "${accountName}"`);
+          return childAccountName === accountName || childAccountName.includes(accountName);
+        });
+        
+        if (matchingChild) {
+          console.log('✅ Found matching child:', matchingChild);
+          const isPlaidAccount = !!(matchingChild.plaid_account_id || 
+                                   matchingChild.plaid_account_display_name || 
+                                   matchingChild.institution_name ||
+                                   (matchingChild.plaid_metadata && matchingChild.plaid_metadata !== '{}'));
+          console.log(`🔍 Is Plaid account: ${isPlaidAccount}`);
+          return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+        }
+      }
+      
+      // Alternative approach: use specific child data if available
+      const specificChild = isFromAccount ? transaction.credit_child : transaction.debit_child;
+      if (specificChild) {
+        console.log(`🔍 Using specific ${isFromAccount ? 'credit' : 'debit'} child:`, specificChild);
+        const isPlaidAccount = !!(specificChild.plaid_account_id || 
+                                 specificChild.plaid_account_display_name || 
+                                 specificChild.institution_name ||
+                                 (specificChild.plaid_metadata && specificChild.plaid_metadata !== '{}'));
+        console.log(`🔍 Specific child is Plaid account: ${isPlaidAccount}`);
+        return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+      }
+      
+      // Fallback: no Plaid indicators found
+      console.log('❌ No Plaid indicators found for', accountName);
+      return accountName;
     };
 
-    const formattedFrom = addPlaidIndicator(fromAccount);
-    const formattedTo = addPlaidIndicator(toAccount);
+    const formattedFrom = addPlaidIndicator(fromAccount, true);
+    const formattedTo = addPlaidIndicator(toAccount, false);
     
-    return `${formattedFrom} → ${formattedTo}`;
+    const result = `${formattedFrom} → ${formattedTo}`;
+    console.log('🎯 formatTransferAccountNames result:', result);
+    return result;
   };
 
   // Format account name in selection screens with Plaid indicator
@@ -274,12 +355,20 @@ export default function App() {
     const accountName = account.display_name || account.name;
     
     // Check if it's a Plaid account based on available fields
+    // Physical cash accounts should NOT have plaid_account_id or institution_name
     const isPlaidAccount = !!(account.plaid_account_id || 
-                             account.institution_name || 
-                             (account.type_name && 
-                              account.type_name.toLowerCase().includes('plaid')));
+                             account.plaid_account_display_name ||
+                             account.institution_name);
     
-    return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+    // Additional check: ensure it's not a physical cash account
+    const isPhysicalCash = account.subtype_name === 'physical cash' || 
+                          account.type_name === 'cash' ||
+                          (account.institution_name === null && !account.plaid_account_id);
+    
+    // Only show Plaid indicator if it's actually a Plaid account and NOT physical cash
+    const shouldShowPlaidIndicator = isPlaidAccount && !isPhysicalCash;
+    
+    return shouldShowPlaidIndicator ? `⚡ ${accountName}` : accountName;
   };
 
   // Load attachments for a specific transaction in edit mode
@@ -478,6 +567,9 @@ export default function App() {
               to_account: toAccount,
               account_display_name: `${fromAccount} → ${toAccount}`,
               category_name: 'Transfer',
+              transfer_children: children, // Preserve children for Plaid detection
+              debit_child: debitChild,     // Preserve individual child data
+              credit_child: creditChild,   // Preserve individual child data
             };
           }
         } else {
@@ -1113,6 +1205,14 @@ export default function App() {
     }).replace(',', '.');
   };
 
+  // Helper function to format grouped dates for split payments
+  const formatGroupedDates = (dates: string[]): string[] => {
+    if (!dates || dates.length <= 1) return [];
+    
+    // Sort dates (earliest first) and format each one
+    return dates.sort().map(dateString => formatTransactionDate(dateString));
+  };
+
   // Extract datetime from Plaid metadata if available (only if has meaningful time)
   const getPlaidDateTime = (transaction: any): Date | null => {
     if (!transaction.plaid_metadata) return null;
@@ -1320,10 +1420,10 @@ export default function App() {
       console.log('🔄 Handling grouped transaction account display');
       
       if (transaction.is_transfer) {
-        // Transfer between accounts: show "From Account -> To Account"
+        // Transfer between accounts: show "From Account -> To Account" with Plaid indicators
         const fromAccount = transaction.from_account || 'Unknown Account';
         const toAccount = transaction.to_account || 'Unknown Account';
-        const displayName = `${fromAccount} → ${toAccount}`;
+        const displayName = formatTransferAccountNames(fromAccount, toAccount, transaction);
         
         // Create a special account data object for display
         const transferAccountData = {
@@ -1367,40 +1467,63 @@ export default function App() {
             return `${month}. ${day}, ${year}`;
           };
           
-          // Try to get account names with Plaid indicators - first check if main transaction has account info, then check children
+          // Try to get account names with Plaid indicators - use same logic as card view
           const getAccountName = (child: any, index: number) => {
-            console.log('🏦 Child transaction data:', child);
+            console.log(`🏦 Processing child ${index + 1} transaction data:`, {
+              child_id: child?.id,
+              account_display_name: child?.account_display_name,
+              plaid_account_display_name: child?.plaid_account_display_name,
+              plaid_account_id: child?.plaid_account_id,
+              institution_name: child?.institution_name,
+              has_plaid_metadata: !!(child?.plaid_metadata && child.plaid_metadata !== '{}')
+            });
             
-            let accountName;
-            let sourceData;
+            // Get account name - prefer main transaction account for all children since they're all from the same account
+            const accountName = transaction.account_display_name || 
+                               child?.account_display_name || 
+                               child?.plaid_account_display_name || 
+                               child?.asset_display_name || 
+                               child?.plaid_account_name ||
+                               child?.asset_name || 
+                               child?.account_name ||
+                               child?.account || 
+                               'Unknown Account';
             
-            // For grouped transactions, the main transaction already has the correct account_display_name
-            // This is the same logic used in the transaction list display
-            if (index === 0 && transaction.account_display_name && transaction.account_display_name !== 'Unknown Account') {
-              console.log('✅ Using main transaction account name:', transaction.account_display_name);
-              accountName = transaction.account_display_name;
-              sourceData = transaction; // Use main transaction for Plaid detection
-            } else {
-              // For additional children or if main account is unknown, try child account fields
-              accountName = child?.account_display_name || 
-                           child?.plaid_account_display_name || 
-                           child?.asset_display_name || 
-                           child?.plaid_account_name ||
-                           child?.asset_name || 
-                           child?.account_name ||
-                           child?.account || 
-                           transaction.account_display_name || // Fallback to main transaction account
-                           'Unknown Account';
-              sourceData = child || transaction; // Use child data for Plaid detection
+            console.log(`🔍 Account name: "${accountName}"`);
+            
+            // Use the same Plaid detection logic as the card view - if ANY child in the group has Plaid, ALL are Plaid
+            let isPlaidAccount = false;
+            
+            // Check if the main transaction has Plaid indicators
+            const mainTransactionPlaid = !!(transaction.plaid_account_id || 
+                                           transaction.plaid_account_display_name || 
+                                           transaction.institution_name ||
+                                           (transaction.plaid_metadata && transaction.plaid_metadata !== '{}'));
+            
+            if (mainTransactionPlaid) {
+              isPlaidAccount = true;
+            } else if (transaction.group_children) {
+              // Check all children for Plaid indicators - if any child is Plaid, all are Plaid
+              for (const groupChild of transaction.group_children) {
+                const childHasPlaid = !!(groupChild.plaid_account_id || 
+                                        groupChild.plaid_account_display_name || 
+                                        groupChild.institution_name ||
+                                        (groupChild.plaid_metadata && groupChild.plaid_metadata !== '{}'));
+                if (childHasPlaid) {
+                  isPlaidAccount = true;
+                  break;
+                }
+              }
             }
             
-            // Check if it's a Plaid account and add ⚡ indicator
-            const isPlaidAccount = !!(sourceData?.plaid_account_id || 
-                                     sourceData?.plaid_account_display_name || 
-                                     sourceData?.institution_name ||
-                                     (sourceData?.plaid_metadata && sourceData.plaid_metadata !== '{}'));
+            console.log(`🔍 Payment #${index + 1} Plaid check:`, {
+              main_transaction_plaid: mainTransactionPlaid,
+              final_is_plaid: isPlaidAccount
+            });
             
-            return isPlaidAccount ? `⚡ ${accountName}` : accountName;
+            const result = isPlaidAccount ? `⚡ ${accountName}` : accountName;
+            console.log(`🎯 Payment #${index + 1} final result: "${result}"`);
+            return result;
           };
           
           // Format amount with currency
@@ -1742,7 +1865,7 @@ export default function App() {
               )}
               <Text style={styles.receiptIcon}>⏩</Text>
             </View>
-            <Text style={styles.account}>{formatTransferAccountNames(item.from_account, item.to_account)}</Text>
+            <Text style={styles.account}>{formatTransferAccountNames(item.from_account, item.to_account, item)}</Text>
           </View>
         </View>
         </TouchableOpacity>
@@ -1759,7 +1882,18 @@ export default function App() {
       const amountStyle = item.is_split_payment ? styles.expense : styles.grouped;
 
       return (
-        <TouchableOpacity onPress={() => handleTransactionPress(item)}>
+        <TouchableOpacity 
+          onPress={() => handleTransactionPress(item)}
+          onLongPress={() => {
+            // Debug: Show Plaid detection info on long press
+            const childrenInfo = item.group_children?.map((child, i) => 
+              `Child ${i+1}: ${child.account_display_name || 'No Name'} (Plaid: ${!!(child.plaid_account_id || child.plaid_account_display_name || child.institution_name)})`
+            ).join('\n') || 'No children';
+            
+            const debugInfo = `Transaction: ${item.payee}\nAccount: ${item.account_display_name}\nIs Grouped: ${item.is_grouped_non_transfer}\nChildren: ${item.group_children?.length || 0}\nDirect Plaid: ${!!(item.plaid_account_id || item.plaid_account_display_name || item.institution_name)}\n\nChildren Details:\n${childrenInfo}\n\nFormatted: ${formatAccountDisplayName(item)}`;
+            Alert.alert('Debug Info', debugInfo, [{ text: 'OK' }], { cancelable: true });
+          }}
+        >
           <View style={[styles.transactionCard, cardStyle]}>
           {/* First line: Amount (left) and Date (right) */}
           <View style={styles.transactionHeader}>
@@ -1767,9 +1901,21 @@ export default function App() {
               {currency} {formatAmount(displayAmount)}
             </Text>
             <View style={styles.dateContainer}>
-              <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
-              {hasTransactionTime(item.date, item.id, item) && (
-                <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
+              {item.is_split_payment && item.group_dates && item.group_dates.length > 1 ? (
+                // Show stacked dates for split payments
+                <View style={styles.groupDates}>
+                  {formatGroupedDates(item.group_dates).map((date, index) => (
+                    <Text key={index} style={styles.date}>{date}</Text>
+                  ))}
+                </View>
+              ) : (
+                // Show single date for payment+refund or single-date transactions
+                <>
+                  <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+                  {hasTransactionTime(item.date, item.id, item) && (
+                    <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
+                  )}
+                </>
               )}
             </View>
           </View>
