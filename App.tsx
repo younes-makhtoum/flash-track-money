@@ -77,6 +77,46 @@ export default function App() {
     }));
   };
 
+  // Transactions search state
+  const [transactionSearchQuery, setTransactionSearchQuery] = useState('');
+
+  // Filter transactions based on search query
+  const filteredTransactions = React.useMemo(() => {
+    if (!transactionSearchQuery.trim()) {
+      return transactions;
+    }
+    
+    const query = transactionSearchQuery.toLowerCase().trim();
+    
+    return transactions.filter((transaction) => {
+      // Search across multiple fields with explicit string conversion
+      const searchableFields = [
+        transaction.payee,
+        transaction.notes,
+        transaction.category_name,
+        transaction.account_display_name,
+        transaction.plaid_account_display_name,
+        transaction.display_name,
+        transaction.original_name,
+        transaction.date,
+        // Convert amount to string explicitly (handle both string and number types)
+        transaction.amount ? String(transaction.amount) : '',
+        // Search in tags if they exist
+        ...(transaction.tags || []).map((tag: any) => 
+          typeof tag === 'string' ? tag : (tag?.name ? String(tag.name) : '')
+        )
+      ];
+      
+      // Filter out null/undefined values and convert to lowercase strings
+      const validFields = searchableFields
+        .filter(field => field != null && field !== '')
+        .map(field => String(field).toLowerCase());
+      
+      // Check if any field contains the exact sequence (case-insensitive)
+      return validFields.some(field => field.indexOf(query) !== -1);
+    });
+  }, [transactions, transactionSearchQuery]);
+
   // Helper function to generate appropriate icons for categories and category groups
   const getCategoryIcon = (name: string, isGroup: boolean = false, size: number = 20): React.ReactElement => {
     const lowerName = name.toLowerCase();
@@ -1269,12 +1309,51 @@ export default function App() {
         console.log(`📊 After processing transfers: ${allTransactions.length} transactions`);
       }
       
-      // Sort transactions by date (most recent first)
+      // Sort transactions by date and time (newest to oldest)
       const sortedTransactions = allTransactions.sort((a: any, b: any) => {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
+        // Get dates for both transactions
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        
+        // First sort by date (newest to oldest)
+        const dateDiff = dateB.getTime() - dateA.getTime();
+        if (dateDiff !== 0) {
+          return dateDiff;
+        }
+        
+        // If dates are the same, sort by time
+        const timeA = getPlaidDateTime(a);
+        const timeB = getPlaidDateTime(b);
+        
+        // Both have time - sort by time (newest to oldest)
+        if (timeA && timeB) {
+          return timeB.getTime() - timeA.getTime();
+        }
+        
+        // One has time, one doesn't - put timed transaction first
+        if (timeA && !timeB) {
+          return -1; // a comes before b
+        }
+        if (!timeA && timeB) {
+          return 1; // b comes before a
+        }
+        
+        // Neither has time - maintain original order (by id if available)
+        if (a.id && b.id) {
+          return Number(b.id) - Number(a.id);
+        }
+        
+        return 0;
       });
       
       console.log(`📊 Total transactions after merging: ${sortedTransactions.length}`);
+      
+      // Debug: Log first few transactions to verify sorting
+      console.log('🕐 First 5 transactions after sorting (newest to oldest):');
+      sortedTransactions.slice(0, 5).forEach((t: any, index: number) => {
+        const plaidTime = getPlaidDateTime(t);
+        console.log(`${index + 1}. ${t.date} ${plaidTime ? plaidTime.toTimeString().split(' ')[0] : 'no-time'} - ${t.payee} (${t.amount})`);
+      });
       
       setTransactions(sortedTransactions);
     } catch (error) {
@@ -2243,15 +2322,33 @@ export default function App() {
             ) : (
               <>
                 <View style={styles.sectionTitleContainer}>
-                  <Text style={styles.sectionTitle}>Recent Transactions</Text>
+                  <Text style={styles.sectionTitle}>Transactions</Text>
                   {!token && (
                     <View style={styles.tokenWarning}>
                       <Text style={styles.tokenWarningText}>⚠️ Token missing - no sync active</Text>
                     </View>
                   )}
                 </View>
+                
+                {/* Always visible search bar with filter icon */}
+                <View style={styles.searchBarContainer}>
+                  <View style={styles.searchInputContainer}>
+                    <Text style={styles.searchIcon}>🔍</Text>
+                    <TextInput
+                      style={styles.searchInput}
+                      placeholder="Search"
+                      placeholderTextColor="#A0A0A0"
+                      value={transactionSearchQuery}
+                      onChangeText={setTransactionSearchQuery}
+                      returnKeyType="search"
+                    />
+                  </View>
+                  <TouchableOpacity style={styles.filterButton}>
+                    <Text style={styles.filterIcon}>≡</Text>
+                  </TouchableOpacity>
+                </View>
                 <FlatList
-                  data={transactions.length > 0 ? transactions : sampleTransactions}
+                  data={filteredTransactions}
                   renderItem={renderTransaction}
                   keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
                   style={styles.mainTransactionsList}
@@ -3901,6 +3998,48 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
+  // Search Components
+  searchBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginBottom: 15,
+    gap: 12,
+  },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchIcon: {
+    fontSize: 16,
+    color: '#A0A0A0',
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    padding: 0, // Remove default padding
+  },
+  filterButton: {
+    width: 40,
+    height: 40,
+    backgroundColor: '#007AFF',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterIcon: {
+    fontSize: 18,
+    color: '#fff',
+    fontWeight: 'bold',
+  },
+  
   // Transactions List Styles
   mainTransactionsList: {
     flex: 1,
@@ -4466,17 +4605,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-  },
-  searchIcon: {
-    fontSize: 18,
-    marginRight: 10,
-    color: '#666',
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#333',
-    paddingVertical: 4,
   },
   categoryContent: {
     flex: 1,
