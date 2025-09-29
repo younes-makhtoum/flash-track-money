@@ -3068,6 +3068,9 @@ export default function App() {
       selectedAccountData?.isGroupedTransaction
     );
     
+    // Check if this is a recurring transaction
+    const isRecurringTransaction = editingTransaction && Boolean(editingTransaction.recurring_id);
+    
     return (
       <View style={[
         styles.transactionDetailsContainer,
@@ -3098,7 +3101,10 @@ export default function App() {
             <View style={styles.detailsHalfSection}>
               <Text style={styles.detailsLabel}>DATE</Text>
               <TouchableOpacity 
-                style={styles.detailsDateButton}
+                style={[
+                  styles.detailsDateButton,
+                  (selectedAccountData?.isPlaidAccount || isGroupedTransaction || isRecurringTransaction) && styles.detailsInputDisabled
+                ]}
                 onPress={() => {
                   if (selectedAccountData?.isPlaidAccount) {
                     Alert.alert(
@@ -3112,12 +3118,18 @@ export default function App() {
                       'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
                       [{ text: 'OK' }]
                     );
+                  } else if (isRecurringTransaction) {
+                    Alert.alert(
+                      'Date Not Editable',
+                      'Date cannot be edited for recurring transactions. The date is controlled by the recurring rule.',
+                      [{ text: 'OK' }]
+                    );
                   } else {
                     setShowDatePicker(true);
                   }
                 }}
               >
-                <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
+                <Text style={styles.detailsDateText}>
                   {formatDateForDisplay(transactionDate)}
                 </Text>
                 <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -3127,7 +3139,10 @@ export default function App() {
               <View style={styles.detailsHalfSection}>
                 <Text style={styles.detailsLabel}>TIME</Text>
                 <TouchableOpacity 
-                  style={styles.detailsDateButton}
+                  style={[
+                    styles.detailsDateButton,
+                    (selectedAccountData?.isPlaidAccount || isGroupedTransaction || isRecurringTransaction) && styles.detailsInputDisabled
+                  ]}
                   onPress={() => {
                     if (selectedAccountData?.isPlaidAccount) {
                       Alert.alert(
@@ -3141,12 +3156,18 @@ export default function App() {
                         'This is a grouped transaction. Date, time, amount, account, and category cannot be changed.',
                         [{ text: 'OK' }]
                       );
+                    } else if (isRecurringTransaction) {
+                      Alert.alert(
+                        'Time Not Editable',
+                        'Time cannot be edited for recurring transactions. The time is controlled by the recurring rule.',
+                        [{ text: 'OK' }]
+                      );
                     } else {
                       setShowTimePicker(true);
                     }
                   }}
                 >
-                  <Text style={[styles.detailsDateText, (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled]}>
+                  <Text style={styles.detailsDateText}>
                     {formatTimeForDisplay(transactionDate)}
                   </Text>
                   <Text style={styles.detailsDropdownIcon}>▼</Text>
@@ -3158,23 +3179,23 @@ export default function App() {
           {/* Amount Section - Field 2 (only in edit mode) */}
           <View style={styles.detailsSection}>
             <Text style={styles.detailsLabel}>AMOUNT</Text>
-            <View style={styles.amountInputContainer}>
+            <View style={[
+              styles.amountInputContainer,
+              (selectedAccountData?.isPlaidAccount || isGroupedTransaction || isRecurringTransaction) && styles.detailsInputDisabled
+            ]}>
               {!isGroupedTransaction && (
                 <Text style={[styles.amountSign, transactionType === 'income' ? styles.positiveSign : styles.negativeSign]}>
                   {transactionType === 'income' ? '+' : '-'}
                 </Text>
               )}
               <TextInput
-                style={[
-                  styles.amountInput,
-                  (selectedAccountData?.isPlaidAccount || isGroupedTransaction) && styles.inputDisabled
-                ]}
+                style={styles.amountInput}
                 placeholder="0.00"
                 placeholderTextColor="#A0A0A0"
                 value={amount}
-                onChangeText={(selectedAccountData?.isPlaidAccount || isGroupedTransaction) ? undefined : setAmount}
+                onChangeText={(selectedAccountData?.isPlaidAccount || isGroupedTransaction || isRecurringTransaction) ? undefined : setAmount}
                 keyboardType="numeric"
-                editable={!selectedAccountData?.isPlaidAccount && !isGroupedTransaction}
+                editable={!selectedAccountData?.isPlaidAccount && !isGroupedTransaction && !isRecurringTransaction}
                 onFocus={() => {
                   if (selectedAccountData?.isPlaidAccount) {
                     Alert.alert(
@@ -3186,6 +3207,12 @@ export default function App() {
                     Alert.alert(
                       'Field Not Editable',
                       'Amount cannot be edited for grouped transactions. Only payee, notes, tags, and attachments can be modified.',
+                      [{ text: 'OK' }]
+                    );
+                  } else if (isRecurringTransaction) {
+                    Alert.alert(
+                      'Field Not Editable',
+                      'Amount cannot be edited for recurring transactions. This field is controlled by the recurring rule.',
                       [{ text: 'OK' }]
                     );
                   }
@@ -3203,13 +3230,20 @@ export default function App() {
             <TouchableOpacity 
               style={[
                 styles.detailsInput,
-                (selectedAccountData?.isEditable === false || isGroupedTransaction) && styles.detailsInputDisabled
+                (selectedAccountData?.isEditable === false || isGroupedTransaction || isRecurringTransaction) && styles.detailsInputDisabled
               ]}
               onPress={() => {
                 if (isGroupedTransaction) {
                   Alert.alert(
                     'Account Not Editable', 
                     'This is a grouped transaction. Account cannot be changed. Only payee, notes, tags, and attachments can be modified.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                } else if (isRecurringTransaction) {
+                  Alert.alert(
+                    'Account Not Editable',
+                    'Account cannot be edited for recurring transactions. The account is controlled by the recurring rule.',
                     [{ text: 'OK' }]
                   );
                   return;
@@ -3243,11 +3277,24 @@ export default function App() {
           <View style={styles.detailsSection}>
             <Text style={styles.detailsLabel}>PAYEE</Text>
             <TextInput
-              style={styles.detailsInput}
+              style={[
+                styles.detailsInput,
+                isRecurringTransaction && styles.detailsInputDisabled
+              ]}
               placeholder="Enter payee name"
               placeholderTextColor="#A0A0A0"
               value={transactionPayee}
-              onChangeText={setTransactionPayee}
+              onChangeText={isRecurringTransaction ? undefined : setTransactionPayee}
+              editable={!isRecurringTransaction}
+              onFocus={() => {
+                if (isRecurringTransaction) {
+                  Alert.alert(
+                    'Field Not Editable',
+                    'Payee cannot be edited for recurring transactions. This field is controlled by the recurring rule.',
+                    [{ text: 'OK' }]
+                  );
+                }
+              }}
             />
           </View>
 
@@ -3255,13 +3302,26 @@ export default function App() {
           <View style={styles.detailsSection}>
             <Text style={styles.detailsLabel}>NOTES</Text>
             <TextInput
-              style={styles.detailsInput}
+              style={[
+                styles.detailsInput,
+                isRecurringTransaction && styles.detailsInputDisabled
+              ]}
               placeholder="Description"
               placeholderTextColor="#A0A0A0"
               value={transactionNote}
-              onChangeText={setTransactionNote}
+              onChangeText={isRecurringTransaction ? undefined : setTransactionNote}
+              editable={!isRecurringTransaction}
               multiline={true}
               numberOfLines={3}
+              onFocus={() => {
+                if (isRecurringTransaction) {
+                  Alert.alert(
+                    'Field Not Editable',
+                    'Notes cannot be edited for recurring transactions. This field is controlled by the recurring rule.',
+                    [{ text: 'OK' }]
+                  );
+                }
+              }}
             />
           </View>
 
@@ -3271,13 +3331,21 @@ export default function App() {
             <TouchableOpacity 
               style={[
                 styles.detailsInput,
-                isGroupedTransaction && styles.detailsInputDisabled
+                (isGroupedTransaction || isRecurringTransaction) && styles.detailsInputDisabled
               ]}
               onPress={() => {
                 if (isGroupedTransaction) {
                   Alert.alert(
                     'Category Not Editable',
                     'This is a grouped transaction. Category cannot be changed. Only payee, notes, tags, and attachments can be modified.',
+                    [{ text: 'OK' }]
+                  );
+                  return;
+                }
+                if (isRecurringTransaction) {
+                  Alert.alert(
+                    'Category Not Editable',
+                    'Category cannot be edited for recurring transactions. This field is controlled by the recurring rule.',
                     [{ text: 'OK' }]
                   );
                   return;
