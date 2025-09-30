@@ -1311,9 +1311,9 @@ export default function App() {
       
       // Sort transactions by date and time (newest to oldest)
       const sortedTransactions = allTransactions.sort((a: any, b: any) => {
-        // Get dates for both transactions
-        const dateA = new Date(a.date);
-        const dateB = new Date(b.date);
+        // Get correct dates for both transactions (prioritizing Plaid metadata)
+        const dateA = new Date(getCorrectTransactionDate(a));
+        const dateB = new Date(getCorrectTransactionDate(b));
         
         // First sort by date (newest to oldest)
         const dateDiff = dateB.getTime() - dateA.getTime();
@@ -1406,19 +1406,32 @@ export default function App() {
   };
 
   // Helper function to format dates in a user-friendly way
-  const formatTransactionDate = (dateString: string): string => {
-    const date = new Date(dateString);
+  const formatTransactionDate = (transaction: any): string => {
+    // Use the correct date (prioritizing Plaid metadata)
+    const dateString = getCorrectTransactionDate(transaction);
+    
+    // Parse the date string and create a local date to avoid timezone issues
+    const [year, month, day] = dateString.split('-').map(Number);
+    const date = new Date(year, month - 1, day); // month is 0-indexed in JS
+    
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     
+    // Normalize all dates to compare only date parts (ignore time)
+    const normalizeDate = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    
+    const normalizedDate = normalizeDate(date);
+    const normalizedToday = normalizeDate(today);
+    const normalizedYesterday = normalizeDate(yesterday);
+    
     // Check if it's today
-    if (date.toDateString() === today.toDateString()) {
+    if (normalizedDate.getTime() === normalizedToday.getTime()) {
       return 'Today';
     }
     
     // Check if it's yesterday
-    if (date.toDateString() === yesterday.toDateString()) {
+    if (normalizedDate.getTime() === normalizedYesterday.getTime()) {
       return 'Yesterday';
     }
     
@@ -1430,12 +1443,21 @@ export default function App() {
     }).replace(',', '.');
   };
 
-  // Helper function to format grouped dates for split payments
+  // Helper function to format grouped dates for split payments (simplified)
   const formatGroupedDates = (dates: string[]): string[] => {
     if (!dates || dates.length <= 1) return [];
     
-    // Sort dates (earliest first) and format each one
-    return dates.sort().map(dateString => formatTransactionDate(dateString));
+    // Sort dates (earliest first) and format each one using simple date formatting
+    return dates.sort().map(dateString => {
+      const [year, month, day] = dateString.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+      }).replace(',', '.');
+    });
   };
 
   // Extract datetime from Plaid metadata if available (only if has meaningful time)
@@ -1470,6 +1492,36 @@ export default function App() {
     }
     
     return null;
+  };
+
+  // Get the correct date for a transaction (prioritizes Plaid metadata date over API date)
+  const getCorrectTransactionDate = (transaction: any): string => {
+    if (!transaction.plaid_metadata) {
+      return transaction.date;
+    }
+    
+    try {
+      const plaidMetadata = JSON.parse(transaction.plaid_metadata);
+      
+      // Prioritize the 'date' field from Plaid metadata over the API's date field
+      // This handles cases where authorized_date != actual transaction date
+      if (plaidMetadata.date) {
+        return plaidMetadata.date;
+      }
+      
+      // Fallback to the datetime field's date component
+      if (plaidMetadata.datetime) {
+        const plaidDate = new Date(plaidMetadata.datetime);
+        if (!isNaN(plaidDate.getTime())) {
+          return plaidDate.toISOString().split('T')[0]; // Extract YYYY-MM-DD
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse plaid_metadata for date:', e);
+    }
+    
+    // Fallback to API date
+    return transaction.date;
   };
 
   // Check if transaction has meaningful time data (not default times like 00:00 or 01:00)
@@ -2069,7 +2121,7 @@ export default function App() {
               {currency} {formatAmount(displayAmount)}
             </Text>
             <View style={styles.dateContainer}>
-              <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+              <Text style={styles.date}>{formatTransactionDate(item)}</Text>
               {hasTransactionTime(item.date, item.id, item) && (
                 <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
               )}
@@ -2136,7 +2188,7 @@ export default function App() {
               ) : (
                 // Show single date for payment+refund or single-date transactions
                 <>
-                  <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+                  <Text style={styles.date}>{formatTransactionDate(item)}</Text>
                   {hasTransactionTime(item.date, item.id, item) && (
                     <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
                   )}
@@ -2237,7 +2289,7 @@ export default function App() {
             {!isIncome ? '-' : ''}{currency} {formatAmount(displayAmount)}
           </Text>
           <View style={styles.dateContainer}>
-            <Text style={styles.date}>{formatTransactionDate(item.date)}</Text>
+            <Text style={styles.date}>{formatTransactionDate(item)}</Text>
             {hasTransactionTime(item.date, item.id, item) && (
               <Text style={styles.time}>{formatTransactionTime(item.date, item.id, item)}</Text>
             )}
