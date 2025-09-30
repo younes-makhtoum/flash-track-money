@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform, Image } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -80,15 +80,92 @@ export default function App() {
   // Transactions search state
   const [transactionSearchQuery, setTransactionSearchQuery] = useState('');
 
-  // Filter transactions based on search query
+  // Month filter state
+  const [scrollY, setScrollY] = useState(0);
+  const [showMonthFilter, setShowMonthFilter] = useState(false);
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string | null>(null); // Format: "YYYY-MM"
+  const monthFilterScrollRef = useRef<ScrollView>(null);
+  
+  // State for smart positioning behavior
+  const [shouldPositionAtRecent, setShouldPositionAtRecent] = useState(true); // Position at recent on first load
+  const [savedScrollPosition, setSavedScrollPosition] = useState(0); // Remember scroll position
+
+  // Handle month filter scroll to save position
+  const handleMonthFilterScroll = (event: any) => {
+    const scrollX = event.nativeEvent.contentOffset.x;
+    setSavedScrollPosition(scrollX);
+  };
+
+  // Handle ScrollView layout to position initially
+  const handleMonthFilterLayout = () => {
+    if (shouldPositionAtRecent && monthFilterScrollRef.current && availableMonths && availableMonths.length > 0) {
+      // Position at end immediately when ScrollView is laid out
+      monthFilterScrollRef.current.scrollToEnd({ animated: false });
+      setShouldPositionAtRecent(false);
+    } else if (!shouldPositionAtRecent && monthFilterScrollRef.current) {
+      // Restore saved position
+      monthFilterScrollRef.current.scrollTo({ x: savedScrollPosition, animated: false });
+    }
+  };
+
+  // Reset positioning flag when returning to transactions screen (after adding/editing)
+  useEffect(() => {
+    if (currentScreen === 'transactions') {
+      setShouldPositionAtRecent(true);
+    }
+  }, [currentScreen]);
+
+  // Get the correct date for a transaction (prioritizes Plaid metadata date over API date)
+  const getCorrectTransactionDate = (transaction: any): string => {
+    if (!transaction.plaid_metadata) {
+      return transaction.date;
+    }
+    
+    try {
+      const plaidMetadata = JSON.parse(transaction.plaid_metadata);
+      
+      // Prioritize the 'date' field from Plaid metadata over the API's date field
+      // This handles cases where authorized_date != actual transaction date
+      if (plaidMetadata.date) {
+        return plaidMetadata.date;
+      }
+      
+      // Fallback to the datetime field's date component
+      if (plaidMetadata.datetime) {
+        const plaidDate = new Date(plaidMetadata.datetime);
+        if (!isNaN(plaidDate.getTime())) {
+          return plaidDate.toISOString().split('T')[0]; // Extract YYYY-MM-DD
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to parse plaid_metadata for date:', e);
+    }
+    
+    // Fallback to API date
+    return transaction.date;
+  };
+
+  // Filter transactions based on search query and month filter
   const filteredTransactions = React.useMemo(() => {
+    let result = transactions;
+
+    // Apply month filter first
+    if (selectedMonthFilter) {
+      result = result.filter((transaction) => {
+        const correctDate = getCorrectTransactionDate(transaction);
+        const transactionMonth = correctDate.substring(0, 7); // YYYY-MM format
+        return transactionMonth === selectedMonthFilter;
+      });
+    }
+
+    // Apply search filter
     if (!transactionSearchQuery.trim()) {
-      return transactions;
+      return result;
     }
     
     const query = transactionSearchQuery.toLowerCase().trim();
     
-    return transactions.filter((transaction) => {
+    return result.filter((transaction) => {
       // Search across multiple fields with explicit string conversion
       const searchableFields = [
         transaction.payee,
@@ -115,7 +192,51 @@ export default function App() {
       // Check if any field contains the exact sequence (case-insensitive)
       return validFields.some(field => field.indexOf(query) !== -1);
     });
-  }, [transactions, transactionSearchQuery]);
+  }, [transactions, transactionSearchQuery, selectedMonthFilter]);
+
+  // Extract unique months from transactions for filter
+  const availableMonths = React.useMemo(() => {
+    const monthsSet = new Set<string>();
+    
+    transactions.forEach((transaction) => {
+      const correctDate = getCorrectTransactionDate(transaction);
+      const monthYear = correctDate.substring(0, 7); // YYYY-MM format
+      monthsSet.add(monthYear);
+    });
+    
+    // Convert to array and sort (oldest first, so newest appears on the right)
+    return Array.from(monthsSet).sort();
+  }, [transactions]);
+
+  // Handle scroll for progressive filter banner
+  const handleScroll = (event: any) => {
+    const currentScrollY = event.nativeEvent.contentOffset.y;
+    setScrollY(currentScrollY);
+    
+    // Show month filter when scrolled down more than 100px
+    const shouldShow = currentScrollY > 100;
+    if (shouldShow !== showMonthFilter) {
+      setShowMonthFilter(shouldShow);
+    }
+  };
+
+  // Format month-year for display (e.g., "2025-09" -> "September\n2025")
+  const formatMonthYear = (monthYear: string): { month: string; year: string; showYear: boolean } => {
+    const [year, month] = monthYear.split('-');
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    
+    const currentYear = new Date().getFullYear().toString();
+    const showYear = year !== currentYear;
+    
+    return {
+      month: monthNames[parseInt(month) - 1],
+      year: year,
+      showYear: showYear
+    };
+  };
 
   // Helper function to generate appropriate icons for categories and category groups
   const getCategoryIcon = (name: string, isGroup: boolean = false, size: number = 20): React.ReactElement => {
@@ -1494,36 +1615,6 @@ export default function App() {
     return null;
   };
 
-  // Get the correct date for a transaction (prioritizes Plaid metadata date over API date)
-  const getCorrectTransactionDate = (transaction: any): string => {
-    if (!transaction.plaid_metadata) {
-      return transaction.date;
-    }
-    
-    try {
-      const plaidMetadata = JSON.parse(transaction.plaid_metadata);
-      
-      // Prioritize the 'date' field from Plaid metadata over the API's date field
-      // This handles cases where authorized_date != actual transaction date
-      if (plaidMetadata.date) {
-        return plaidMetadata.date;
-      }
-      
-      // Fallback to the datetime field's date component
-      if (plaidMetadata.datetime) {
-        const plaidDate = new Date(plaidMetadata.datetime);
-        if (!isNaN(plaidDate.getTime())) {
-          return plaidDate.toISOString().split('T')[0]; // Extract YYYY-MM-DD
-        }
-      }
-    } catch (e) {
-      console.warn('Failed to parse plaid_metadata for date:', e);
-    }
-    
-    // Fallback to API date
-    return transaction.date;
-  };
-
   // Check if transaction has meaningful time data (not default times like 00:00 or 01:00)
   const hasTransactionTime = (dateString: string, transactionId?: string | number, transaction?: any): boolean => {
     // Helper function to check if time is meaningful (not default values)
@@ -2382,23 +2473,64 @@ export default function App() {
                   )}
                 </View>
                 
-                {/* Always visible search bar with filter icon */}
-                <View style={styles.searchBarContainer}>
-                  <View style={styles.searchInputContainer}>
-                    <Text style={styles.searchIcon}>🔍</Text>
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder="Search"
-                      placeholderTextColor="#A0A0A0"
-                      value={transactionSearchQuery}
-                      onChangeText={setTransactionSearchQuery}
-                      returnKeyType="search"
-                    />
+                {/* Progressive Month Filter Banner */}
+                {showMonthFilter && (
+                  <View style={styles.monthFilterBanner}>
+                    <ScrollView 
+                      ref={monthFilterScrollRef}
+                      horizontal 
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.monthFilterContent}
+                      onScroll={handleMonthFilterScroll}
+                      scrollEventThrottle={16}
+                      onLayout={handleMonthFilterLayout}
+                    >
+                      {/* Month cards */}
+                      {availableMonths.map((monthYear) => {
+                        const { month, year, showYear } = formatMonthYear(monthYear);
+                        const isSelected = selectedMonthFilter === monthYear;
+                        
+                        return (
+                          <TouchableOpacity
+                            key={monthYear}
+                            style={[
+                              styles.monthFilterCard,
+                              isSelected && styles.monthFilterCardActive
+                            ]}
+                            onPress={() => setSelectedMonthFilter(isSelected ? null : monthYear)}
+                          >
+                            <Text style={[
+                              styles.monthFilterText,
+                              isSelected && styles.monthFilterTextActive
+                            ]}>
+                              {month}{showYear && ` ${year}`}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
                   </View>
-                  <TouchableOpacity style={styles.filterButton}>
-                    <Text style={styles.filterIcon}>≡</Text>
-                  </TouchableOpacity>
-                </View>
+                )}
+                
+                {/* Search bar - hidden when month filter is visible */}
+                {!showMonthFilter && (
+                  <View style={styles.searchBarContainer}>
+                    <View style={styles.searchInputContainer}>
+                      <Text style={styles.searchIcon}>🔍</Text>
+                      <TextInput
+                        style={styles.searchInput}
+                        placeholder="Search"
+                        placeholderTextColor="#A0A0A0"
+                        value={transactionSearchQuery}
+                        onChangeText={setTransactionSearchQuery}
+                        returnKeyType="search"
+                      />
+                    </View>
+                    <TouchableOpacity style={styles.filterButton}>
+                      <Text style={styles.filterIcon}>≡</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
                 <FlatList
                   data={filteredTransactions}
                   renderItem={renderTransaction}
@@ -2406,6 +2538,8 @@ export default function App() {
                   style={styles.mainTransactionsList}
                   showsVerticalScrollIndicator={false}
                   contentContainerStyle={styles.transactionsListContent}
+                  onScroll={handleScroll}
+                  scrollEventThrottle={16}
                 />
               </>
             )}
@@ -5568,5 +5702,54 @@ const styles = StyleSheet.create({
   groupedCard: {
     backgroundColor: '#faf0ff', // Very light purple background
     borderLeftColor: '#8E44AD', // Purple border for grouped transactions
+  },
+  
+  // Month Filter Banner Styles
+  monthFilterBanner: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#f8f9fa',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  monthFilterScroll: {
+    flexGrow: 0,
+  },
+  monthFilterContent: {
+    paddingHorizontal: 8,
+  },
+  monthFilterCard: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    marginRight: 8,
+    borderRadius: 20,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthFilterCardActive: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  monthFilterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333333',
+    textAlign: 'center',
+  },
+  monthFilterTextActive: {
+    color: '#ffffff',
+  },
+  monthFilterYear: {
+    fontSize: 11,
+    color: '#666666',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  monthFilterYearActive: {
+    color: '#ffffff',
+    opacity: 0.9,
   },
 });
