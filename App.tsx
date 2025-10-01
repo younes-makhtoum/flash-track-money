@@ -8,6 +8,7 @@ import AttachmentModal from './src/components/AttachmentModal';
 import ReceiptGallery from './src/components/ReceiptGallery';
 import { SecureStorage } from './src/utils/storage';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Feather from 'react-native-vector-icons/Feather';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 
@@ -16,9 +17,6 @@ const LUNCH_MONEY_API_URL = 'https://dev.lunchmoney.app/v1';
 
 // Simple API client with better error handling
 const callLunchMoneyAPI = async (endpoint: string, token: string) => {
-  console.log('Making API call to:', `${LUNCH_MONEY_API_URL}${endpoint}`);
-  console.log('Token length:', token.length);
-  
   try {
     const response = await fetch(`${LUNCH_MONEY_API_URL}${endpoint}`, {
       headers: {
@@ -27,22 +25,61 @@ const callLunchMoneyAPI = async (endpoint: string, token: string) => {
       },
     });
 
-    console.log('Response status:', response.status);
-    console.log('Response headers:', response.headers);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.log('Error response:', errorText);
       throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const data = await response.json();
-    console.log('API response data:', data);
     return data;
   } catch (error) {
     console.error('API call failed:', error);
     throw error;
   }
+};
+
+// Currency flag mapping
+const getCurrencyFlag = (currency: string): string => {
+  const flags: { [key: string]: string } = {
+    'EUR': '🇪🇺', // European Union flag
+    'USD': '🇺🇸', // United States
+    'GBP': '🇬🇧', // United Kingdom
+    'MAD': '🇲🇦', // Morocco
+    'CAD': '🇨🇦', // Canada
+    'AUD': '🇦🇺', // Australia
+    'JPY': '🇯🇵', // Japan
+    'CHF': '🇨🇭', // Switzerland
+    'CNY': '🇨🇳', // China
+    'INR': '🇮🇳', // India
+    'BRL': '🇧🇷', // Brazil
+    'KRW': '🇰🇷', // South Korea
+    'SGD': '🇸🇬', // Singapore
+    'HKD': '🇭🇰', // Hong Kong
+    'NOK': '🇳🇴', // Norway
+    'SEK': '🇸🇪', // Sweden
+    'DKK': '🇩🇰', // Denmark
+    'PLN': '🇵🇱', // Poland
+    'CZK': '🇨🇿', // Czech Republic
+    'HUF': '🇭🇺', // Hungary
+    'RUB': '🇷🇺', // Russia
+    'TRY': '🇹🇷', // Turkey
+    'ZAR': '🇿🇦', // South Africa
+    'MXN': '🇲🇽', // Mexico
+    'ARS': '🇦🇷', // Argentina
+    'CLP': '🇨🇱', // Chile
+    'COP': '🇨🇴', // Colombia
+    'PEN': '🇵🇪', // Peru
+    'THB': '🇹🇭', // Thailand
+    'VND': '🇻🇳', // Vietnam
+    'PHP': '🇵🇭', // Philippines
+    'IDR': '🇮🇩', // Indonesia
+    'MYR': '🇲🇾', // Malaysia
+    'EGP': '🇪🇬', // Egypt
+    'NGN': '🇳🇬', // Nigeria
+    'KES': '🇰🇪', // Kenya
+    'GHS': '🇬🇭', // Ghana
+  };
+  return flags[currency.toUpperCase()] || '💰'; // Default money emoji if currency not found
 };
 
 export default function App() {
@@ -89,6 +126,58 @@ export default function App() {
   // State for smart positioning behavior
   const [shouldPositionAtRecent, setShouldPositionAtRecent] = useState(true); // Position at recent on first load
   const [savedScrollPosition, setSavedScrollPosition] = useState(0); // Remember scroll position
+
+  // Advanced filters state
+  const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
+  const [selectedCurrencies, setSelectedCurrencies] = useState<string[]>([]);
+  const [showOnlyGrouped, setShowOnlyGrouped] = useState(false);
+  const [showOnlyRecurring, setShowOnlyRecurring] = useState(false);
+  const [showOnlyWithAttachments, setShowOnlyWithAttachments] = useState(false);
+  const [isSelectAllMode, setIsSelectAllMode] = useState(true); // true = "Clear All" mode, false = "Select All" mode
+  const [currencySectionExpanded, setCurrencySectionExpanded] = useState(true);
+  const [accountsSectionExpanded, setAccountsSectionExpanded] = useState(true);
+  const [specialFiltersSectionExpanded, setSpecialFiltersSectionExpanded] = useState(true);
+
+  // Initialize selected accounts and currencies with all available options
+  useEffect(() => {
+    if (accounts.length > 0 && selectedAccounts.length === 0) {
+      const accountIds = accounts.map(account => String(account.id));
+      setSelectedAccounts(accountIds);
+    }
+  }, [accounts]);
+
+  // Extract unique currencies from active accounts only and initialize selection
+  const availableCurrencies = React.useMemo(() => {
+    const currencies = new Set<string>();
+    accounts.forEach(account => {
+      // Only include currencies from accounts that are loaded (which are now only active accounts)
+      if (account.currency) {
+        currencies.add(account.currency.toUpperCase());
+      }
+    });
+    return Array.from(currencies).sort();
+  }, [accounts]);
+
+  useEffect(() => {
+    if (availableCurrencies.length > 0 && selectedCurrencies.length === 0) {
+      setSelectedCurrencies(availableCurrencies);
+    }
+  }, [availableCurrencies]);
+
+  // Fetch accounts when navigating to Advanced Filters if not loaded
+  useEffect(() => {
+    if (currentScreen === 'advancedFilters' && accounts.length === 0 && token) {
+      fetchAccounts();
+    }
+  }, [currentScreen, accounts.length, token]);
+
+  // Fetch accounts when on transactions screen if needed for filtering logic
+  useEffect(() => {
+    if (currentScreen === 'transactions' && accounts.length === 0 && token && 
+        (selectedAccounts.length > 0 || showOnlyGrouped || showOnlyRecurring || showOnlyWithAttachments)) {
+      fetchAccounts();
+    }
+  }, [currentScreen, accounts.length, token, selectedAccounts.length, showOnlyGrouped, showOnlyRecurring, showOnlyWithAttachments]);
 
   // Handle month filter scroll to save position
   const handleMonthFilterScroll = (event: any) => {
@@ -146,6 +235,26 @@ export default function App() {
   };
 
   // Filter transactions based on search query and month filter
+  // Determine if we're in "Select All" mode (when some filters are cleared) or "Clear All" mode (when all are selected)
+  const isInSelectAllMode = React.useMemo(() => {
+    const hasUncheckedAccounts = selectedAccounts.length < accounts.length;
+    const hasCheckedSpecialFilters = showOnlyGrouped || showOnlyRecurring || showOnlyWithAttachments;
+    
+    // Select All mode = when some filters are cleared (NOT all accounts selected OR some special filters active)
+    return hasUncheckedAccounts || hasCheckedSpecialFilters;
+  }, [selectedAccounts.length, accounts.length, showOnlyGrouped, showOnlyRecurring, showOnlyWithAttachments]);
+
+  // Check if advanced filters are active
+  const hasActiveAdvancedFilters = React.useMemo(() => {
+    const hasAccountFilter = selectedAccounts.length > 0 && selectedAccounts.length < accounts.length;
+    const hasSpecialFilters = showOnlyGrouped || showOnlyRecurring || showOnlyWithAttachments;
+    console.log('🔍 selectedAccounts.length:', selectedAccounts.length);
+    console.log('🔍 accounts.length:', accounts.length);
+    console.log('🔍 hasAccountFilter:', hasAccountFilter);
+    // Only check account filter and special filters since currency is redundant with accounts
+    return hasAccountFilter || hasSpecialFilters;
+  }, [selectedAccounts, accounts, showOnlyGrouped, showOnlyRecurring, showOnlyWithAttachments]);
+
   const filteredTransactions = React.useMemo(() => {
     let result = transactions;
 
@@ -157,6 +266,47 @@ export default function App() {
         return transactionMonth === selectedMonthFilter;
       });
     }
+
+    // Apply advanced filters
+    // Account filter (handles both account selection and currency filtering)
+    if (selectedAccounts.length > 0 && selectedAccounts.length < accounts.length) {
+      console.log('🔍 Applying account filter. Selected accounts:', selectedAccounts);
+      // Convert selectedAccounts to numbers for comparison since asset_id and plaid_account_id are numbers
+      const selectedAccountNumbers = selectedAccounts.map(id => parseInt(id, 10));
+      
+      result = result.filter((transaction) => {
+        // A transaction belongs to an account if either:
+        // 1. It has an asset_id that matches a selected account, OR
+        // 2. It has a plaid_account_id that matches a selected account
+        let accountMatch = false;
+        
+        if (transaction.asset_id !== null && transaction.asset_id !== undefined) {
+          accountMatch = selectedAccountNumbers.includes(transaction.asset_id);
+        }
+        
+        if (!accountMatch && transaction.plaid_account_id !== null && transaction.plaid_account_id !== undefined) {
+          accountMatch = selectedAccountNumbers.includes(transaction.plaid_account_id);
+        }
+        return accountMatch;
+      });
+      console.log(`🔍 After account filter: ${result.length} transactions remaining`);
+    }
+
+    // Special filters
+    if (showOnlyGrouped) {
+      result = result.filter((transaction) => {
+        return transaction.is_group === true;
+      });
+    }
+
+    if (showOnlyRecurring) {
+      result = result.filter((transaction) => {
+        return transaction.recurring_id !== null && transaction.recurring_id !== undefined;
+      });
+    }
+
+    // Note: Attachment filtering is handled in finalFilteredTransactions 
+    // to properly check both API attachments and local attachments
 
     // Apply search filter
     if (!transactionSearchQuery.trim()) {
@@ -192,7 +342,18 @@ export default function App() {
       // Check if any field contains the exact sequence (case-insensitive)
       return validFields.some(field => field.indexOf(query) !== -1);
     });
-  }, [transactions, transactionSearchQuery, selectedMonthFilter]);
+  }, [
+    transactions, 
+    transactionSearchQuery, 
+    selectedMonthFilter, 
+    selectedAccounts, 
+    selectedCurrencies, 
+    showOnlyGrouped, 
+    showOnlyRecurring, 
+    showOnlyWithAttachments,
+    accounts,
+    availableCurrencies
+  ]);
 
   // Extract unique months from transactions for filter
   const availableMonths = React.useMemo(() => {
@@ -538,6 +699,29 @@ export default function App() {
     return localAttachments[id] && localAttachments[id].length > 0;
   };
 
+  // Final filtered transactions that includes local attachment filtering
+  const finalFilteredTransactions = React.useMemo(() => {
+    if (!showOnlyWithAttachments) {
+      return filteredTransactions;
+    }
+    
+    // Apply attachment filter checking both API attachments and local attachments
+    return filteredTransactions.filter((transaction) => {
+      // Check API-level attachments first
+      if (transaction.has_attachments === true || 
+          (transaction.attachments && transaction.attachments.length > 0)) {
+        return true;
+      }
+      
+      // Check local attachments if transaction has an ID
+      if (transaction.id && hasLocalAttachments(transaction.id)) {
+        return true;
+      }
+      
+      return false;
+    });
+  }, [filteredTransactions, showOnlyWithAttachments, localAttachments]);
+
   // Check if account is a Plaid account and format display name with ⚡ icon
   const formatAccountDisplayName = (transaction: any): string => {
     // Get the account name
@@ -547,13 +731,6 @@ export default function App() {
                        transaction.account || 
                        'Unknown Account';
     
-    console.log('🔍 formatAccountDisplayName called for:', accountName);
-    console.log('🔍 Transaction type:', { 
-      is_grouped_non_transfer: transaction.is_grouped_non_transfer,
-      has_group_children: !!(transaction.group_children),
-      children_count: transaction.group_children?.length || 0
-    });
-    
     // Check if it's a Plaid account (has plaid-related fields)
     let isPlaidAccount = !!(transaction.plaid_account_id || 
                            transaction.plaid_account_display_name || 
@@ -562,8 +739,6 @@ export default function App() {
     
     // For grouped non-transfer transactions, also check children for Plaid metadata
     if (!isPlaidAccount && transaction.is_grouped_non_transfer && transaction.group_children) {
-      console.log('🔍 Checking group_children for Plaid metadata...');
-      
       // Check all children for any Plaid indicators - if any child is Plaid, the account is Plaid
       for (const child of transaction.group_children) {
         const childHasPlaid = !!(child.plaid_account_id || 
@@ -571,17 +746,7 @@ export default function App() {
                                 child.institution_name ||
                                 (child.plaid_metadata && child.plaid_metadata !== '{}'));
         
-        console.log(`🔍 Child ${child.id} Plaid check:`, {
-          account_display_name: child.account_display_name,
-          plaid_account_id: !!child.plaid_account_id,
-          plaid_account_display_name: !!child.plaid_account_display_name,
-          institution_name: !!child.institution_name,
-          has_plaid_metadata: !!(child.plaid_metadata && child.plaid_metadata !== '{}'),
-          is_plaid: childHasPlaid
-        });
-        
         if (childHasPlaid) {
-          console.log('✅ Found Plaid child, marking account as Plaid');
           isPlaidAccount = true;
           break; // Found one Plaid child, that's enough
         }
@@ -589,25 +754,18 @@ export default function App() {
     }
     
     const result = isPlaidAccount ? `⚡ ${accountName}` : accountName;
-    console.log('🎯 formatAccountDisplayName result:', result);
     return result;
   };
 
   // Format transfer account names with Plaid indicators using transaction data
   const formatTransferAccountNames = (fromAccount: string, toAccount: string, transaction?: any): string => {
-    console.log('🔍 formatTransferAccountNames called with:', { fromAccount, toAccount, hasTransaction: !!transaction });
-    
     const addPlaidIndicator = (accountName: string, isFromAccount: boolean): string => {
       if (!transaction) {
-        console.log('⚠️ No transaction data available for Plaid detection');
         return accountName;
       }
       
-      console.log(`🔍 Checking Plaid indicator for ${accountName} (${isFromAccount ? 'from' : 'to'} account)`);
-      
       // Check for transfer_children first (new preserved data)
       const childrenToCheck = transaction.transfer_children || transaction.children;
-      console.log('🔍 Children to check:', childrenToCheck?.length || 0);
       
       if (childrenToCheck && Array.isArray(childrenToCheck)) {
         // For transfers, find the child transaction that matches this account
@@ -617,17 +775,14 @@ export default function App() {
                                   child.asset_display_name || 
                                   child.account || 
                                   'Unknown Account';
-          console.log(`🔍 Comparing child account "${childAccountName}" with "${accountName}"`);
           return childAccountName === accountName || childAccountName.includes(accountName);
         });
         
         if (matchingChild) {
-          console.log('✅ Found matching child:', matchingChild);
           const isPlaidAccount = !!(matchingChild.plaid_account_id || 
                                    matchingChild.plaid_account_display_name || 
                                    matchingChild.institution_name ||
                                    (matchingChild.plaid_metadata && matchingChild.plaid_metadata !== '{}'));
-          console.log(`🔍 Is Plaid account: ${isPlaidAccount}`);
           return isPlaidAccount ? `⚡ ${accountName}` : accountName;
         }
       }
@@ -635,17 +790,14 @@ export default function App() {
       // Alternative approach: use specific child data if available
       const specificChild = isFromAccount ? transaction.credit_child : transaction.debit_child;
       if (specificChild) {
-        console.log(`🔍 Using specific ${isFromAccount ? 'credit' : 'debit'} child:`, specificChild);
         const isPlaidAccount = !!(specificChild.plaid_account_id || 
                                  specificChild.plaid_account_display_name || 
                                  specificChild.institution_name ||
                                  (specificChild.plaid_metadata && specificChild.plaid_metadata !== '{}'));
-        console.log(`🔍 Specific child is Plaid account: ${isPlaidAccount}`);
         return isPlaidAccount ? `⚡ ${accountName}` : accountName;
       }
       
       // Fallback: no Plaid indicators found
-      console.log('❌ No Plaid indicators found for', accountName);
       return accountName;
     };
 
@@ -653,7 +805,6 @@ export default function App() {
     const formattedTo = addPlaidIndicator(toAccount, false);
     
     const result = `${formattedFrom} → ${formattedTo}`;
-    console.log('🎯 formatTransferAccountNames result:', result);
     return result;
   };
 
@@ -774,29 +925,23 @@ export default function App() {
 
   // Load accounts when entering add transaction screen
   useEffect(() => {
-    console.log('🔍 useEffect triggered - currentScreen:', currentScreen, 'token:', !!token, 'accounts length:', accounts.length);
-    
     if (token && currentScreen === 'addTransaction') {
       // Only fetch if data is not already loaded or if explicitly needed
       if (accounts.length === 0) {
-        console.log('🚀 Fetching accounts (not loaded yet)');
         fetchAccounts();
       }
       
       if (categories.length === 0) {
-        console.log('🚀 Fetching categories (not loaded yet)');
         fetchCategories();
       }
       
       if (availableTags.length === 0) {
-        console.log('🚀 Fetching tags (not loaded yet)');
         fetchTags();
       }
     }
     
     // Also fetch tags when entering the tags selection screen
     if (token && currentScreen === 'selectTags' && availableTags.length === 0) {
-      console.log('🏷️ Fetching tags for tags selection screen');
       fetchTags();
     }
   }, [token, currentScreen]);
@@ -824,8 +969,6 @@ export default function App() {
       // 2. OR it's the main group transaction itself
       return !t.group_id || groupIds.has(t.id);
     });
-    
-    console.log(`🔄 Filtered ${transactions.length - filteredTransactions.length} individual transfer transactions`);
     
     // Now process the group transactions to show proper transfer info
     const processedTransactions = filteredTransactions.map((transaction: any) => {
@@ -863,8 +1006,6 @@ export default function App() {
                             `Account ${debitChild.asset_id}` ||
                             'Unknown Account';
             
-            console.log(`🔄 Processing transfer: ${transferAmount} ${transaction.currency} from ${fromAccount} (credit: ${creditChild.amount}) to ${toAccount} (debit: ${debitChild.amount})`);
-            
             return {
               ...transaction,
               payee: `Transfer: ${fromAccount} → ${toAccount}`,
@@ -881,7 +1022,6 @@ export default function App() {
           }
         } else {
           // Handle non-transfer groups (like payment + refund vs split payments)
-          console.log(`📋 Processing non-transfer group: ${transaction.category_name} with ${children.length} children`);
           
           // Analyze the transaction types to determine if it's payment+refund or split payments
           const childrenAmounts = children.map((c: any) => parseFloat(c.amount || 0));
@@ -892,8 +1032,6 @@ export default function App() {
           // If all amounts are of the same sign, it's likely split payments
           const isSplitPayment = (positiveAmounts.length === 0 && negativeAmounts.length === children.length) ||
                                 (negativeAmounts.length === 0 && positiveAmounts.length === children.length);
-          
-          console.log(`📊 Transaction analysis: ${positiveAmounts.length} positive, ${negativeAmounts.length} negative, isSplitPayment: ${isSplitPayment}`);
           
           // For non-transfer groups, calculate net amount and collect dates
           const totalAmount = parseFloat(transaction.amount || 0);
@@ -932,55 +1070,83 @@ export default function App() {
 
   const fetchAccounts = async () => {
     if (!token) {
-      console.log('❌ No token available for fetching accounts');
       return;
     }
     
     try {
-      console.log('🏦 Fetching accounts for selection...');
       setIsLoading(true);
-      const accountsData = await callLunchMoneyAPI('/assets', token);
-      console.log('🏦 Raw accounts response:', accountsData);
       
-      if (accountsData && accountsData.assets) {
-        console.log('🏦 All assets:', accountsData.assets);
+      let allAccounts: any[] = [];
+      
+      // Step 1: Fetch assets (manual accounts)
+      try {
+        const accountsData = await callLunchMoneyAPI('/assets', token);
         
-        // Debug: Log the structure of the first asset to see available fields
-        if (accountsData.assets.length > 0) {
-          console.log('🔍 First asset structure:', JSON.stringify(accountsData.assets[0], null, 2));
-          console.log('🔍 Available fields:', Object.keys(accountsData.assets[0]));
-        }
-        
-        // Filter for ONLY physical cash assets that are active (closed_on is null)
-        const physicalCashAccounts = accountsData.assets.filter((asset: any) => {
-          const isCash = asset.type_name === "cash";
-          const isPhysicalCash = asset.subtype_name === "physical cash";
-          const isActive = asset.closed_on === null; // Active accounts have closed_on = null
+        if (accountsData && accountsData.assets) {
+          // Filter active assets: checking accounts and physical cash
+          const activeAssets = accountsData.assets.filter((asset: any) => {
+            const isCheckingAccount = asset.subtype_name === "checking";
+            const isPhysicalCash = asset.subtype_name === "physical cash";
+            
+            // For assets: active means closed_on is null
+            const isActive = asset.closed_on === null;
+            
+            const shouldInclude = (isCheckingAccount || isPhysicalCash) && isActive;
+            
+            return shouldInclude;
+          });
           
-          console.log(`Account ${asset.name}: type_name="${asset.type_name}", subtype_name="${asset.subtype_name}", cash=${isCash}, physical_cash=${isPhysicalCash}, active=${isActive}, closed_on=${asset.closed_on}`);
-          console.log(`🔍 Full asset object:`, asset);
-          return isCash && isPhysicalCash && isActive;
-        });
-        
-        console.log('🏦 Filtered physical cash accounts only:', physicalCashAccounts);
-        setAccounts(physicalCashAccounts);
-        
-        if (physicalCashAccounts.length === 0) {
-          console.log('⚠️ No physical cash accounts found after filtering');
-        } else {
-          // Auto-select preferred account only if no account is currently selected
-          if (!selectedAccount) {
-            console.log('🎯 No account selected, running auto-selection');
-            setTimeout(() => autoSelectPreferredAccount(), 100);
-          } else {
-            console.log('✅ Account already selected, keeping current selection:', selectedAccount);
-          }
+          // Add assets to accounts list with a type identifier
+          activeAssets.forEach((asset: any) => {
+            allAccounts.push({
+              ...asset,
+              accountType: 'asset'
+            });
+          });
         }
+      } catch (assetsError) {
+        console.log('❌ Error fetching assets:', assetsError);
+      }
+      
+      // Step 2: Fetch Plaid accounts (bank-connected accounts)
+      try {
+        const plaidData = await callLunchMoneyAPI('/plaid_accounts', token);
+        
+        if (plaidData && plaidData.plaid_accounts) {
+          // Filter active Plaid accounts
+          const activePlaidAccounts = plaidData.plaid_accounts.filter((plaidAccount: any) => {
+            // For plaid accounts: active means status is "active"
+            const isActive = plaidAccount.status === "active";
+            
+            return isActive;
+          });
+          
+          // Add plaid accounts to accounts list with a type identifier and normalized structure
+          activePlaidAccounts.forEach((plaidAccount: any) => {
+            allAccounts.push({
+              id: plaidAccount.id,
+              name: plaidAccount.display_name || plaidAccount.name,
+              currency: plaidAccount.currency,
+              accountType: 'plaid'
+            });
+          });
+        }
+      } catch (plaidError) {
+        console.log('❌ Error fetching plaid accounts:', plaidError);
+      }
+      
+      setAccounts(allAccounts);
+      
+      if (allAccounts.length === 0) {
+        setError('No active accounts found. Please check your Lunch Money account setup.');
       } else {
-        console.log('❌ No assets property in response');
+        // Auto-select preferred account only if no account is currently selected
+        if (!selectedAccount) {
+          setTimeout(() => autoSelectPreferredAccount(), 100);
+        }
       }
     } catch (error) {
-      console.log('❌ Error fetching accounts:', error);
+      console.error('Error fetching accounts:', error);
       setError('Failed to fetch accounts');
     } finally {
       setIsLoading(false);
@@ -1340,7 +1506,6 @@ export default function App() {
       let assetMap: { [key: string]: string } = {};
       try {
         accountsData = await callLunchMoneyAPI('/assets', token);
-        console.log('🏦 Available assets/accounts:', accountsData);
         
         // Create a mapping of asset_id to display_name and store accounts
         if (accountsData && accountsData.assets) {
@@ -1349,18 +1514,15 @@ export default function App() {
             !asset.plaid_account_id && asset.status === 'active'
           );
           setAccounts(manualAccounts);
-          console.log('📱 Manual accounts for selection:', manualAccounts);
           
           accountsData.assets.forEach((asset: any) => {
             assetMap[asset.id.toString()] = asset.display_name || asset.name;
           });
-          console.log('🗺️ Asset mapping:', assetMap);
         }
         
         // Also try to get Plaid accounts which might have different IDs
         try {
           const plaidData = await callLunchMoneyAPI('/plaid_accounts', token);
-          console.log('🏦 Plaid accounts:', plaidData);
           
           if (plaidData && plaidData.plaid_accounts) {
             plaidData.plaid_accounts.forEach((account: any) => {
@@ -1369,13 +1531,10 @@ export default function App() {
                 assetMap[`plaid_${account.id}`] = account.display_name;
               }
             });
-            console.log('🗺️ Updated asset mapping with Plaid accounts:', assetMap);
           }
         } catch (plaidError) {
-          console.log('ℹ️ Could not fetch Plaid accounts:', plaidError);
         }
       } catch (accountError) {
-        console.log('ℹ️ Could not fetch assets:', accountError);
       }
       
       // Fetch more transactions and include all types
@@ -1399,17 +1558,11 @@ export default function App() {
         
         // Log a few sample transactions to understand the transfer structure
         const sampleTransactions = transactionData.transactions.slice(0, 3);
-        console.log('📋 Sample transactions structure:', JSON.stringify(sampleTransactions, null, 2));
-        
-
         
         // Check for transfer-related fields
         const transferTransactions = transactionData.transactions.filter((t: any) => 
           t.category === 'Transfer' || t.category_name === 'Transfer' || t.group_id || t.is_group
         );
-        if (transferTransactions.length > 0) {
-          console.log('🔄 Transfer transactions found:', JSON.stringify(transferTransactions.slice(0, 2), null, 2));
-        }
         
         allTransactions = [...transactionData.transactions];
         
@@ -1421,8 +1574,6 @@ export default function App() {
           const account = t.account_display_name || t.asset_display_name || t.plaid_account_display_name || 'Unknown';
           accountGroups[account] = (accountGroups[account] || 0) + 1;
         });
-        
-        console.log('🏦 Regular transactions by account:', accountGroups);
         console.log(`🔄 Found ${recurringCount} transactions with recurring_id (recurring transactions)`);
         
         // Process transfer groups to combine grouped transfer transactions
@@ -1468,13 +1619,6 @@ export default function App() {
       });
       
       console.log(`📊 Total transactions after merging: ${sortedTransactions.length}`);
-      
-      // Debug: Log first few transactions to verify sorting
-      console.log('🕐 First 5 transactions after sorting (newest to oldest):');
-      sortedTransactions.slice(0, 5).forEach((t: any, index: number) => {
-        const plaidTime = getPlaidDateTime(t);
-        console.log(`${index + 1}. ${t.date} ${plaidTime ? plaidTime.toTimeString().split(' ')[0] : 'no-time'} - ${t.payee} (${t.amount})`);
-      });
       
       setTransactions(sortedTransactions);
     } catch (error) {
@@ -2419,12 +2563,14 @@ export default function App() {
         {/* Fixed Top Banner */}
         <View style={styles.topBanner}>
           <Text style={styles.appName}>⚡Flash Track Money</Text>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => setCurrentScreen('settings')}
-          >
-            <Text style={styles.settingsIcon}>⚙️</Text>
-          </TouchableOpacity>
+          <View style={styles.topBannerRightSection}>
+            <TouchableOpacity 
+              style={styles.settingsButton}
+              onPress={() => setCurrentScreen('settings')}
+            >
+              <Text style={styles.settingsIcon}>⚙️</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Content Area */}
@@ -2466,6 +2612,22 @@ export default function App() {
               <>
                 <View style={styles.sectionTitleContainer}>
                   <Text style={styles.sectionTitle}>Transactions</Text>
+                  <TouchableOpacity 
+                    style={[
+                      styles.filterButton,
+                      hasActiveAdvancedFilters && styles.filterButtonActive
+                    ]}
+                    onPress={() => setCurrentScreen('advancedFilters')}
+                  >
+                    <Feather 
+                      name="sliders" 
+                      size={20} 
+                      color={hasActiveAdvancedFilters ? '#fff' : '#007AFF'} 
+                    />
+                    {hasActiveAdvancedFilters && (
+                      <View style={styles.filterActiveDot} />
+                    )}
+                  </TouchableOpacity>
                   {!token && (
                     <View style={styles.tokenWarning}>
                       <Text style={styles.tokenWarningText}>⚠️ Token missing - no sync active</Text>
@@ -2526,13 +2688,10 @@ export default function App() {
                         returnKeyType="search"
                       />
                     </View>
-                    <TouchableOpacity style={styles.filterButton}>
-                      <Text style={styles.filterIcon}>≡</Text>
-                    </TouchableOpacity>
                   </View>
                 )}
                 <FlatList
-                  data={filteredTransactions}
+                  data={finalFilteredTransactions}
                   renderItem={renderTransaction}
                   keyExtractor={(item) => item.id?.toString() || Math.random().toString()}
                   style={styles.mainTransactionsList}
@@ -3990,6 +4149,279 @@ export default function App() {
     );
   }
 
+  // Advanced Filters Screen
+  if (currentScreen === 'advancedFilters') {
+    return (
+      <View style={styles.container}>
+        {/* Fixed Top Banner */}
+        <View style={styles.topBanner}>
+          <View style={styles.settingsHeaderLeft}>
+            <Text style={styles.settingsIcon}>🔍</Text>
+            <Text style={styles.appName}>Advanced Filters</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            onPress={() => setCurrentScreen('transactions')}
+          >
+            <Text style={styles.closeIcon}>✕</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {accounts.length === 0 ? (
+          <View style={styles.filtersLoadingContainer}>
+            <Text style={styles.filtersLoadingText}>Loading accounts and currencies...</Text>
+          </View>
+        ) : (
+          <ScrollView style={styles.filtersScrollView}>
+          {/* Clear All / Select All Button */}
+          <View style={styles.clearAllContainer}>
+            <TouchableOpacity
+              style={styles.clearAllButton}
+              onPress={() => {
+                if (isInSelectAllMode) {
+                  // Select All mode: check all accounts/currencies, uncheck special filters
+                  setSelectedAccounts(accounts.map(a => String(a.id)));
+                  setSelectedCurrencies(availableCurrencies);
+                  setShowOnlyGrouped(false);
+                  setShowOnlyRecurring(false);
+                  setShowOnlyWithAttachments(false);
+                } else {
+                  // Clear All mode: uncheck all accounts/currencies and special filters
+                  setSelectedAccounts([]);
+                  setSelectedCurrencies([]);
+                  setShowOnlyGrouped(false);
+                  setShowOnlyRecurring(false);
+                  setShowOnlyWithAttachments(false);
+                }
+              }}
+            >
+              <Text style={styles.clearAllButtonText}>
+                {isInSelectAllMode ? 'Select All' : 'Clear All'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          
+          {/* Currencies Section */}
+          {availableCurrencies.length > 0 && (
+            <View style={styles.filterSection}>
+              <TouchableOpacity 
+                style={styles.filterSectionHeader}
+                onPress={() => setCurrencySectionExpanded(!currencySectionExpanded)}
+              >
+                <Text style={styles.filterSectionTitle}>Currencies</Text>
+                <Text style={styles.filterExpandIcon}>
+                  {currencySectionExpanded ? '▼' : '▶'}
+                </Text>
+              </TouchableOpacity>
+              {currencySectionExpanded && availableCurrencies.map((currency) => (
+                <TouchableOpacity
+                  key={currency}
+                  style={styles.filterItem}
+                  onPress={() => {
+                    if (selectedCurrencies.includes(currency)) {
+                      // Uncheck currency and all its accounts
+                      setSelectedCurrencies(selectedCurrencies.filter(c => c !== currency));
+                      const accountsToUncheck = accounts
+                        .filter(account => account.currency?.toUpperCase() === currency)
+                        .map(account => String(account.id));
+                      setSelectedAccounts(selectedAccounts.filter(id => !accountsToUncheck.includes(id)));
+                    } else {
+                      // Check currency and all its accounts
+                      setSelectedCurrencies([...selectedCurrencies, currency]);
+                      const accountsToCheck = accounts
+                        .filter(account => account.currency?.toUpperCase() === currency)
+                        .map(account => String(account.id));
+                      const newSelectedAccounts = [...new Set([...selectedAccounts, ...accountsToCheck])];
+                      setSelectedAccounts(newSelectedAccounts);
+                    }
+                  }}
+                >
+                  <View style={styles.filterItemContent}>
+                    <View style={styles.filterItemLeft}>
+                      <View style={[
+                        styles.checkbox,
+                        selectedCurrencies.includes(currency) && styles.checkboxSelected
+                      ]}>
+                        {selectedCurrencies.includes(currency) && (
+                          <Text style={styles.checkmark}>✓</Text>
+                        )}
+                      </View>
+                      <Text style={styles.currencyFlag}>{getCurrencyFlag(currency)}</Text>
+                      <Text style={styles.filterItemText}>{currency}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          
+          {/* Accounts Section */}
+          <View style={styles.filterSection}>
+            <TouchableOpacity 
+              style={styles.filterSectionHeader}
+              onPress={() => setAccountsSectionExpanded(!accountsSectionExpanded)}
+            >
+              <Text style={styles.filterSectionTitle}>Accounts</Text>
+              <Text style={styles.filterExpandIcon}>
+                {accountsSectionExpanded ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            {accountsSectionExpanded && (accounts.length === 0 ? (
+              <Text style={styles.filterItemText}>Loading accounts...</Text>
+            ) : (
+              // Sort accounts: non-physical cash first, then physical cash, both alphabetically
+              [...accounts]
+                .sort((a, b) => {
+                  const aIsPhysicalCash = a.subtype_name === 'physical cash';
+                  const bIsPhysicalCash = b.subtype_name === 'physical cash';
+                  
+                  // First sort by type (non-physical cash first)
+                  if (aIsPhysicalCash !== bIsPhysicalCash) {
+                    return aIsPhysicalCash ? 1 : -1;
+                  }
+                  
+                  // Then sort alphabetically
+                  const aName = a.display_name || a.name || '';
+                  const bName = b.display_name || b.name || '';
+                  return aName.localeCompare(bName);
+                })
+                .map((account) => {
+                  const isPhysicalCash = account.subtype_name === 'physical cash';
+                  const isPlaidAccount = account.accountType === 'plaid';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={account.id}
+                      style={styles.filterItem}
+                      onPress={() => {
+                        if (selectedAccounts.includes(String(account.id))) {
+                          setSelectedAccounts(selectedAccounts.filter(id => id !== String(account.id)));
+                          // If this was the last account of this currency, uncheck the currency
+                          const remainingAccountsOfCurrency = accounts
+                            .filter(acc => acc.currency?.toUpperCase() === account.currency?.toUpperCase())
+                            .filter(acc => selectedAccounts.includes(String(acc.id)) && String(acc.id) !== String(account.id));
+                          if (remainingAccountsOfCurrency.length === 0) {
+                            setSelectedCurrencies(selectedCurrencies.filter(c => c !== account.currency?.toUpperCase()));
+                          }
+                        } else {
+                          setSelectedAccounts([...selectedAccounts, String(account.id)]);
+                          // Check the currency if not already checked
+                          const currency = account.currency?.toUpperCase();
+                          if (currency && !selectedCurrencies.includes(currency)) {
+                            setSelectedCurrencies([...selectedCurrencies, currency]);
+                          }
+                        }
+                      }}
+                    >
+                      <View style={styles.filterItemContent}>
+                        <View style={styles.filterItemLeft}>
+                          <View style={[
+                            styles.checkbox,
+                            selectedAccounts.includes(String(account.id)) && styles.checkboxSelected
+                          ]}>
+                            {selectedAccounts.includes(String(account.id)) && (
+                              <Text style={styles.checkmark}>✓</Text>
+                            )}
+                          </View>
+                          {isPhysicalCash ? (
+                            <MaterialCommunityIcons name="cash" size={20} color="#666" style={styles.accountIcon} />
+                          ) : (
+                            <MaterialCommunityIcons name="bank" size={20} color="#666" style={styles.accountIcon} />
+                          )}
+                          <Text style={styles.filterItemText}>
+                            {account.display_name || account.name}
+                            {isPlaidAccount && ' ⚡'}
+                          </Text>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+            ))}
+          </View>
+          
+          {/* Special Filters Section */}
+          <View style={styles.filterSection}>
+            <TouchableOpacity 
+              style={styles.filterSectionHeader}
+              onPress={() => setSpecialFiltersSectionExpanded(!specialFiltersSectionExpanded)}
+            >
+              <Text style={styles.filterSectionTitle}>Special Filters</Text>
+              <Text style={styles.filterExpandIcon}>
+                {specialFiltersSectionExpanded ? '▼' : '▶'}
+              </Text>
+            </TouchableOpacity>
+            
+            {specialFiltersSectionExpanded && (
+              <>
+                <TouchableOpacity
+                  style={styles.filterItem}
+                  onPress={() => setShowOnlyGrouped(!showOnlyGrouped)}
+                >
+                  <View style={styles.filterItemContent}>
+                    <View style={styles.filterItemLeft}>
+                      <View style={[
+                        styles.checkbox,
+                        showOnlyGrouped && styles.checkboxSelected
+                      ]}>
+                        {showOnlyGrouped && (
+                          <Text style={styles.checkmark}>✓</Text>
+                        )}
+                      </View>
+                      <MaterialCommunityIcons name="format-list-group" size={20} color="#666" style={styles.accountIcon} />
+                      <Text style={styles.filterItemText}>Only grouped transactions</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.filterItem}
+                  onPress={() => setShowOnlyRecurring(!showOnlyRecurring)}
+                >
+                  <View style={styles.filterItemContent}>
+                    <View style={styles.filterItemLeft}>
+                      <View style={[
+                        styles.checkbox,
+                        showOnlyRecurring && styles.checkboxSelected
+                      ]}>
+                        {showOnlyRecurring && (
+                          <Text style={styles.checkmark}>✓</Text>
+                        )}
+                      </View>
+                      <MaterialCommunityIcons name="repeat" size={20} color="#666" style={styles.accountIcon} />
+                      <Text style={styles.filterItemText}>Only recurring transactions</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.filterItem}
+                  onPress={() => setShowOnlyWithAttachments(!showOnlyWithAttachments)}
+                >
+                  <View style={styles.filterItemContent}>
+                    <View style={styles.filterItemLeft}>
+                      <View style={[
+                        styles.checkbox,
+                        showOnlyWithAttachments && styles.checkboxSelected
+                      ]}>
+                        {showOnlyWithAttachments && (
+                          <Text style={styles.checkmark}>✓</Text>
+                        )}
+                      </View>
+                      <MaterialCommunityIcons name="attachment" size={20} color="#666" style={styles.accountIcon} />
+                      <Text style={styles.filterItemText}>Only transactions with attachments</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </ScrollView>
+        )}
+      </View>
+    );
+  }
+
   // Settings Screen
   if (currentScreen === 'settings') {
     return (
@@ -4088,6 +4520,11 @@ const styles = StyleSheet.create({
     elevation: 3,
     zIndex: 1000,
   },
+  topBannerRightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   appName: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -4095,6 +4532,7 @@ const styles = StyleSheet.create({
   },
   settingsButton: {
     padding: 8,
+    marginRight: 4,
   },
   
   // Placeholder Styles
@@ -4186,14 +4624,10 @@ const styles = StyleSheet.create({
   
   // Search Components
   searchBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginHorizontal: 20,
     marginBottom: 15,
-    gap: 12,
   },
   searchInputContainer: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
@@ -4215,7 +4649,7 @@ const styles = StyleSheet.create({
   filterButton: {
     width: 40,
     height: 40,
-    backgroundColor: '#007AFF',
+    backgroundColor: 'transparent',
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
@@ -4224,6 +4658,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#fff',
     fontWeight: 'bold',
+  },
+  filterButtonActive: {
+    backgroundColor: '#FF3B30',
+    position: 'relative',
+  },
+  filterIconActive: {
+    color: '#fff',
+  },
+  filterActiveDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
   },
   
   // Transactions List Styles
@@ -5751,5 +6201,121 @@ const styles = StyleSheet.create({
   monthFilterYearActive: {
     color: '#ffffff',
     opacity: 0.9,
+  },
+
+  // Advanced Filters Styles
+  filtersScrollView: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+  },
+  filtersLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+  },
+  filtersLoadingText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  clearAllContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#f8f8f8',
+  },
+  clearAllButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  clearAllButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  filterSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: '#ffffff',
+  },
+  filterExpandIcon: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: 'bold',
+  },
+  filterSection: {
+    backgroundColor: '#ffffff',
+    marginTop: 12,
+    paddingVertical: 8,
+    borderTopWidth: 0,
+    borderBottomWidth: 0,
+  },
+  filterSectionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF',
+    marginLeft: 12,
+  },
+  filterItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  filterItemContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  filterItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#d0d0d0',
+    marginRight: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxSelected: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+  },
+  checkmark: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  filterItemText: {
+    fontSize: 16,
+    color: '#333',
+    flex: 1,
+  },
+  currencyFlag: {
+    fontSize: 20,
+    marginHorizontal: 8,
+  },
+  accountIcon: {
+    marginHorizontal: 8,
+  },
+  filterItemSubtext: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
   },
 });
