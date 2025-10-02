@@ -12,6 +12,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import Feather from 'react-native-vector-icons/Feather';
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
+import FontAwesome6 from 'react-native-vector-icons/FontAwesome6';
 
 // Lunch Money API configuration
 const LUNCH_MONEY_API_URL = 'https://dev.lunchmoney.app/v1';
@@ -2563,13 +2564,16 @@ export default function App() {
       <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner */}
         <View style={styles.topBanner}>
-          <Text style={styles.appName}>⚡Flash Track Money</Text>
+          <View style={styles.settingsHeaderLeft}>
+            <FontAwesome6 name="arrow-right-arrow-left" size={20} color="#2D7D7A" style={styles.settingsIcon} />
+            <Text style={styles.appName}>Transactions</Text>
+          </View>
           <View style={styles.topBannerRightSection}>
             <TouchableOpacity 
               style={styles.settingsButton}
               onPress={() => setCurrentScreen('settings')}
             >
-              <Text style={styles.settingsIcon}>⚙️</Text>
+              <Feather name="settings" size={20} color="#2D7D7A" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2612,7 +2616,6 @@ export default function App() {
             ) : (
               <>
                 <View style={styles.sectionTitleContainer}>
-                  <Text style={styles.sectionTitle}>Transactions</Text>
                   <TouchableOpacity 
                     style={[
                       styles.filterButton,
@@ -2729,14 +2732,14 @@ export default function App() {
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>👛</Text>
+            <FontAwesome6 name="wallet" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Pick account</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
             onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
 
@@ -2858,14 +2861,14 @@ export default function App() {
         {/* Header */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>🔀</Text>
+            <FontAwesome6 name="folder-tree" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Pick a category</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
             onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'addTransaction')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
 
@@ -2978,7 +2981,7 @@ export default function App() {
               setIsSearching(false);
             }}
           >
-            <Text style={styles.categoryBackText}>←</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#fff" />
           </TouchableOpacity>
           <TextInput
             style={styles.categorySearchInput}
@@ -3102,7 +3105,7 @@ export default function App() {
             style={styles.categoryBackButton}
             onPress={() => setCurrentScreen(isEditMode ? 'editTransaction' : 'transactionDetails')}
           >
-            <Text style={styles.categoryBackText}>←</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.categorySelectionTitle}>Select Tags</Text>
           <View style={styles.categoryBackButton}></View>
@@ -3227,14 +3230,14 @@ export default function App() {
         {/* Header */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>ℹ️</Text>
+            <FontAwesome6 name="list-ul" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Transaction details</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
             onPress={() => setCurrentScreen('addTransaction')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
 
@@ -3529,7 +3532,7 @@ export default function App() {
         {/* Header */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>✏️</Text>
+            <FontAwesome6 name="file-pen" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Edit Transaction</Text>
           </View>
           <TouchableOpacity 
@@ -3541,7 +3544,7 @@ export default function App() {
               setCurrentScreen('transactions');
             }}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
 
@@ -4002,7 +4005,7 @@ export default function App() {
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.addTransactionHeaderLeft}>
-            <Text style={styles.addTransactionIcon}>➕</Text>
+            <FontAwesome6 name="circle-plus" size={20} color="#2D7D7A" style={styles.addTransactionIcon} />
             <Text style={styles.appName}>Add Transaction</Text>
             <TouchableOpacity 
               style={[
@@ -4026,7 +4029,7 @@ export default function App() {
             style={styles.settingsButton}
             onPress={() => setCurrentScreen('transactions')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
 
@@ -4164,14 +4167,14 @@ export default function App() {
         {/* Fixed Top Banner */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>🔍</Text>
+            <FontAwesome6 name="sliders" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Advanced Filters</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
             onPress={() => setCurrentScreen('transactions')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
         
@@ -4437,14 +4440,14 @@ export default function App() {
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
-            <Text style={styles.settingsIcon}>⚙️</Text>
+            <Feather name="settings" size={20} color="#2D7D7A" style={styles.settingsIcon} />
             <Text style={styles.appName}>Settings</Text>
           </View>
           <TouchableOpacity 
             style={styles.settingsButton}
             onPress={() => setCurrentScreen('transactions')}
           >
-            <Text style={styles.closeIcon}>✕</Text>
+            <FontAwesome6 name="arrow-left" size={20} color="#2D7D7A" />
           </TouchableOpacity>
         </View>
         
