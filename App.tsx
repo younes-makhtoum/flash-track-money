@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, TextInput, FlatList, ActivityIndicator, ScrollView, Modal, Platform, Image } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -2559,7 +2560,7 @@ export default function App() {
   // Transactions Screen
   if (currentScreen === 'transactions') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner */}
         <View style={styles.topBanner}>
           <Text style={styles.appName}>⚡Flash Track Money</Text>
@@ -2717,14 +2718,14 @@ export default function App() {
             <Text style={styles.fabIcon}>+</Text>
           </TouchableOpacity>
         )}
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Account Selection Screen
   if (currentScreen === 'selectAccount') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
@@ -2745,23 +2746,29 @@ export default function App() {
             <View style={styles.noAccountsContainer}>
               <Text style={styles.noAccountsText}>Loading accounts...</Text>
             </View>
-          ) : accounts.length === 0 ? (
-            <View style={styles.noAccountsContainer}>
-              <Text style={styles.noAccountsText}>
-                {token ? 'No manual accounts found' : 'No API token configured'}
-              </Text>
-              <Text style={styles.noAccountsText}>
-                Check console for debugging info
-              </Text>
-            </View>
-          ) : (
-            <>
-              <View style={styles.accountCountContainer}>
-                <Text style={styles.accountCountText}>
-                  {accounts.length} physical cash account{accounts.length !== 1 ? 's' : ''} available
+          ) : (() => {
+            // Filter to only show physical cash accounts for transaction creation
+            const editableAccounts = accounts.filter(account => 
+              account.subtype_name === "physical cash"
+            );
+            
+            return editableAccounts.length === 0 ? (
+              <View style={styles.noAccountsContainer}>
+                <Text style={styles.noAccountsText}>
+                  {token ? 'No physical cash accounts found' : 'No API token configured'}
+                </Text>
+                <Text style={styles.noAccountsText}>
+                  Check console for debugging info
                 </Text>
               </View>
-              {accounts.map((account) => {
+            ) : (
+              <>
+                <View style={styles.accountCountContainer}>
+                  <Text style={styles.accountCountText}>
+                    {editableAccounts.length} physical cash account{editableAccounts.length !== 1 ? 's' : ''} available
+                  </Text>
+                </View>
+                {editableAccounts.map((account) => {
                 const accountTypeDisplay = account.type_name || 'Cash';
                 const accountIcon = account.type_name?.toLowerCase().includes('cash') ? '💵' : '🏦';
                 
@@ -2803,9 +2810,10 @@ export default function App() {
                 );
               })}
             </>
-          )}
+            );
+          })()}
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -2846,7 +2854,7 @@ export default function App() {
     }
 
     return (
-      <View style={styles.categorySelectionContainer}>
+      <SafeAreaView style={styles.categorySelectionContainer}>
         {/* Header */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
@@ -2944,7 +2952,7 @@ export default function App() {
               );
             })}
         </ScrollView>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -2959,7 +2967,7 @@ export default function App() {
         );
 
     return (
-      <View style={styles.categorySelectionContainer}>
+      <SafeAreaView style={styles.categorySelectionContainer}>
         {/* Header with Search */}
         <View style={styles.categorySearchHeader}>
           <TouchableOpacity 
@@ -3075,7 +3083,7 @@ export default function App() {
             );
           })}
         </ScrollView>
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -3088,7 +3096,7 @@ export default function App() {
       : availableTags;
 
     return (
-      <View style={styles.categorySelectionContainer}>
+      <SafeAreaView style={styles.categorySelectionContainer}>
         <View style={styles.categorySelectionHeader}>
           <TouchableOpacity 
             style={styles.categoryBackButton}
@@ -3205,14 +3213,14 @@ export default function App() {
             </View>
           )}
         </ScrollView>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Transaction Details Screen
   if (currentScreen === 'transactionDetails') {
     return (
-      <View style={[
+      <SafeAreaView style={[
         styles.transactionDetailsContainer,
         selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
       ]}>
@@ -3497,7 +3505,7 @@ export default function App() {
           onClose={() => setShowReceiptGallery(false)}
           onDeleteAttachment={handleDeleteFromGallery}
         />
-      </View>
+      </SafeAreaView>
     );
   }
 
@@ -3514,7 +3522,7 @@ export default function App() {
     const isRecurringTransaction = editingTransaction && Boolean(editingTransaction.recurring_id);
     
     return (
-      <View style={[
+      <SafeAreaView style={[
         styles.transactionDetailsContainer,
         selectedCategoryData?.is_income ? styles.incomeBackground : styles.expenseBackground
       ]}>
@@ -3983,14 +3991,14 @@ export default function App() {
           onClose={() => setShowReceiptGallery(false)}
           onDeleteAttachment={handleDeleteFromGallery}
         />
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Add Transaction Screen
   if (currentScreen === 'addTransaction') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.addTransactionHeaderLeft}>
@@ -4145,14 +4153,14 @@ export default function App() {
             </View>
           </View>
         </View>
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Advanced Filters Screen
   if (currentScreen === 'advancedFilters') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
@@ -4324,9 +4332,9 @@ export default function App() {
                             )}
                           </View>
                           {isPhysicalCash ? (
-                            <MaterialCommunityIcons name="cash" size={20} color="#666" style={styles.accountIcon} />
+                            <MaterialCommunityIcons name="cash" size={20} color="#666" style={styles.filterAccountIcon} />
                           ) : (
-                            <MaterialCommunityIcons name="bank" size={20} color="#666" style={styles.accountIcon} />
+                            <MaterialCommunityIcons name="bank" size={20} color="#666" style={styles.filterAccountIcon} />
                           )}
                           <Text style={styles.filterItemText}>
                             {account.display_name || account.name}
@@ -4368,7 +4376,7 @@ export default function App() {
                           <Text style={styles.checkmark}>✓</Text>
                         )}
                       </View>
-                      <MaterialCommunityIcons name="format-list-group" size={20} color="#666" style={styles.accountIcon} />
+                      <MaterialCommunityIcons name="format-list-group" size={20} color="#666" style={styles.filterAccountIcon} />
                       <Text style={styles.filterItemText}>Only grouped transactions</Text>
                     </View>
                   </View>
@@ -4388,7 +4396,7 @@ export default function App() {
                           <Text style={styles.checkmark}>✓</Text>
                         )}
                       </View>
-                      <MaterialCommunityIcons name="repeat" size={20} color="#666" style={styles.accountIcon} />
+                      <MaterialCommunityIcons name="repeat" size={20} color="#666" style={styles.filterAccountIcon} />
                       <Text style={styles.filterItemText}>Only recurring transactions</Text>
                     </View>
                   </View>
@@ -4408,7 +4416,7 @@ export default function App() {
                           <Text style={styles.checkmark}>✓</Text>
                         )}
                       </View>
-                      <MaterialCommunityIcons name="attachment" size={20} color="#666" style={styles.accountIcon} />
+                      <MaterialCommunityIcons name="attachment" size={20} color="#666" style={styles.filterAccountIcon} />
                       <Text style={styles.filterItemText}>Only transactions with attachments</Text>
                     </View>
                   </View>
@@ -4418,14 +4426,14 @@ export default function App() {
           </View>
         </ScrollView>
         )}
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Settings Screen
   if (currentScreen === 'settings') {
     return (
-      <View style={styles.container}>
+      <SafeAreaView style={styles.container}>
         {/* Fixed Top Banner - Same as main screen */}
         <View style={styles.topBanner}>
           <View style={styles.settingsHeaderLeft}>
@@ -4451,14 +4459,15 @@ export default function App() {
           }}
           accounts={accounts}
         />
-      </View>
+      </SafeAreaView>
     );
   }
 
   // Home Screen
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.container}>
         <Text style={styles.text}>Flash Track Money</Text>
         <Text style={styles.subtitle}>Ready to track expenses!</Text>
         
@@ -4493,6 +4502,7 @@ export default function App() {
         )}
       </View>
     </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
 
@@ -4508,7 +4518,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 50,
+    paddingTop: 15, // Reduced from 50 since SafeAreaView handles safe area
     paddingBottom: 15,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
@@ -4766,7 +4776,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 40,
+    paddingTop: 15, // Reduced from 40 since SafeAreaView handles safe area
     paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
@@ -5100,7 +5110,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 50,
+    paddingTop: 15, // Reduced from 50 since SafeAreaView handles safe area
     paddingBottom: 20,
     backgroundColor: '#2D7D7A',
   },
@@ -5212,7 +5222,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
+    paddingTop: 15, // Reduced from 50 since SafeAreaView handles safe area
     paddingBottom: 15,
     paddingHorizontal: 20,
     backgroundColor: '#2D7D7A',
@@ -5421,7 +5431,7 @@ const styles = StyleSheet.create({
   categorySearchHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 50,
+    paddingTop: 15, // Reduced from 50 since SafeAreaView handles safe area
     paddingBottom: 15,
     paddingHorizontal: 20,
     backgroundColor: '#2D7D7A',
@@ -5477,7 +5487,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50,
+    paddingTop: 15, // Reduced from 50 since SafeAreaView handles safe area
     paddingBottom: 15,
     paddingHorizontal: 20,
     backgroundColor: '#2D7D7A',
@@ -6310,7 +6320,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     marginHorizontal: 8,
   },
-  accountIcon: {
+  filterAccountIcon: {
     marginHorizontal: 8,
   },
   filterItemSubtext: {
